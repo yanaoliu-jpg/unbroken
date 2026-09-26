@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>preview · 通关页 / 终局</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body { display: block; padding: 24px 16px 80px; }
+        #app { margin: 0 auto; }
+        .preview-bar {
+            max-width: 640px; margin: 0 auto 18px; display: flex; gap: 10px;
+            font-family: "SF Mono", Menlo, monospace; font-size: 12px;
+        }
+        .preview-bar button {
+            border: none; border-radius: 999px; padding: 7px 14px; cursor: pointer;
+            background: var(--card-bg); color: var(--ink); box-shadow: var(--shadow);
+            font-family: inherit; font-size: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div class="preview-bar">
+        <button id="re-reward">重放通关页</button>
+        <button id="re-final">重放终局（换一条随机长线）</button>
+    </div>
+
+    <div id="app">
+        <header id="app-header">
+            <h1>Unbroken</h1>
+            <p class="subtitle">键盘一笔画</p>
+        </header>
+
+        <section id="screen-reward" class="screen screen-enter" style="margin-bottom:28px;">
+            <p class="eyebrow">
+                <span>03</span>
+                <span class="eyebrow-total">/ 10</span>
+                <span class="eyebrow-tag">一笔未断</span>
+            </p>
+            <div id="reward-glyph" class="glyph-stage"></div>
+            <p id="reward-sequence" class="sequence"></p>
+            <div id="reward-message" class="reward-card has-words">
+                <div class="reward-sentence">
+                    <p class="sentence-roll" style="margin:0 0 12px 0;"></p>
+                    <div class="sentence-note">字母: T · R · E · A · D</div>
+                </div>
+            </div>
+            <button class="btn btn-primary">下一关</button>
+        </section>
+
+        <section id="screen-final" class="screen screen-enter">
+            <p class="eyebrow">
+                <span>10</span>
+                <span class="eyebrow-total">/ 10</span>
+                <span class="eyebrow-tag">一笔到底</span>
+            </p>
+            <div id="final-glyph" class="glyph-stage glyph-stage-lg"></div>
+            <p class="final-caption">
+                十关的笔迹首尾相接，连成了一条线。<br>
+                这条线只出现过这一次，希望这一路真的让你笑了一下。
+            </p>
+            <button id="btn-restart-game" class="btn btn-primary">再玩一次</button>
+        </section>
+    </div>
+
+    <script>
+        // —— 下面这些是从 script.js 抄过来的同款逻辑，只为预览，不影响正式页面 ——
+        const ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"].map(r => r.split(""));
+        const keyInfo = {};
+        ROWS.forEach((row, r) => row.forEach((k, c) => keyInfo[k] = { row: r, col: c }));
+        const ADJ = {};
+        Object.keys(keyInfo).forEach(k => ADJ[k] = []);
+        Object.entries(keyInfo).forEach(([k, p]) => {
+            Object.entries(keyInfo).forEach(([o, q]) => {
+                if (k === o) return;
+                if ((p.row === q.row && Math.abs(p.col - q.col) === 1) ||
+                    (p.col === q.col && Math.abs(p.row - q.row) === 1)) ADJ[k].push(o);
+            });
+        });
+        const ACCENTS = ["#45b3a3", "#3f9ec9", "#5a8ba0", "#3d947a", "#4f7fbc",
+                         "#8a6840", "#bc7c33", "#3fa5b8", "#c2811a", "#1ea892"];
+        const SVG_NS = "http://www.w3.org/2000/svg";
+        const CHAIN_DRAW_MS = 2600;
+        const CHAIN_TURNS = [-135, -90, -45, 45, 90, 135];
+
+        function randomPath(n) {
+            for (let attempt = 0; attempt < 400; attempt++) {
+                const keys = Object.keys(keyInfo);
+                let cur = keys[Math.floor(Math.random() * keys.length)];
+                const path = [cur], seen = new Set([cur]);
+                while (path.length < n) {
+                    const next = ADJ[cur].filter(k => !seen.has(k));
+                    if (!next.length) break;
+                    cur = next[Math.floor(Math.random() * next.length)];
+                    seen.add(cur); path.push(cur);
+                }
+                if (path.length === n) return path;
+            }
+            return "qwert".split("");
+        }
+
+        function glyphDot(pt, r, className) {
+            const c = document.createElementNS(SVG_NS, "circle");
+            c.setAttribute("class", className);
+            c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y); c.setAttribute("r", r);
+            return c;
+        }
+
+        function renderPathGlyph(container, path) {
+            container.innerHTML = "";
+            const pts = path.map(k => keyInfo[k]).filter(Boolean).map(p => ({ x: p.col, y: p.row }));
+            if (pts.length < 2) return;
+            const pad = 0.55;
+            const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+            const minX = Math.min(...xs) - pad, minY = Math.min(...ys) - pad;
+            const w = Math.max(...xs) + pad - minX, h = Math.max(...ys) + pad - minY;
+            const svg = document.createElementNS(SVG_NS, "svg");
+            svg.setAttribute("class", "glyph");
+            svg.setAttribute("viewBox", `${minX} ${minY} ${w} ${h}`);
+            svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+            const line = document.createElementNS(SVG_NS, "polyline");
+            line.setAttribute("class", "glyph-line");
+            line.setAttribute("points", pts.map(p => `${p.x},${p.y}`).join(" "));
+            svg.appendChild(line);
+            svg.appendChild(glyphDot(pts[0], 0.17, "glyph-start"));
+            svg.appendChild(glyphDot(pts[pts.length - 1], 0.15, "glyph-end"));
+            container.appendChild(svg);
+            const len = line.getTotalLength();
+            line.style.strokeDasharray = len;
+            line.style.strokeDashoffset = len;
+            requestAnimationFrame(() => {
+                line.style.transition = "stroke-dashoffset 820ms cubic-bezier(0.33, 0, 0.35, 1)";
+                line.style.strokeDashoffset = "0";
+                svg.classList.add("drawn");
+            });
+        }
+
+        function renderFinalChain(container, paths) {
+            container.innerHTML = "";
+            const segments = [];
+            let cursor = { x: 0, y: 0 }, angle = 0;
+            paths.forEach((path, i) => {
+                const raw = path.map(k => keyInfo[k]).filter(Boolean).map(p => ({ x: p.col, y: p.row }));
+                if (raw.length < 2) return;
+                if (segments.length) angle += CHAIN_TURNS[Math.floor(Math.random() * CHAIN_TURNS.length)];
+                const rad = angle * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad), o = raw[0];
+                const pts = raw.map(p => {
+                    const dx = p.x - o.x, dy = p.y - o.y;
+                    return { x: cursor.x + dx * cos - dy * sin, y: cursor.y + dx * sin + dy * cos };
+                });
+                cursor = pts[pts.length - 1];
+                segments.push({ pts, color: ACCENTS[i % ACCENTS.length] });
+            });
+            if (!segments.length) return;
+            const all = segments.flatMap(s => s.pts), pad = 0.6;
+            const xs = all.map(p => p.x), ys = all.map(p => p.y);
+            const minX = Math.min(...xs) - pad, minY = Math.min(...ys) - pad;
+            const w = Math.max(...xs) + pad - minX, h = Math.max(...ys) + pad - minY;
+            const svg = document.createElementNS(SVG_NS, "svg");
+            svg.setAttribute("class", "glyph glyph-chain");
+            svg.setAttribute("viewBox", `${minX} ${minY} ${w} ${h}`);
+            svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+            segments.forEach(seg => {
+                const poly = document.createElementNS(SVG_NS, "polyline");
+                poly.setAttribute("class", "glyph-line chain-seg");
+                poly.setAttribute("points", seg.pts.map(p => `${p.x},${p.y}`).join(" "));
+                poly.style.stroke = seg.color;
+                svg.appendChild(poly);
+                seg.el = poly;
+            });
+            const head = segments[0], tail = segments[segments.length - 1];
+            const startDot = glyphDot(head.pts[0], 1, "glyph-start");
+            const endDot = glyphDot(tail.pts[tail.pts.length - 1], 1, "glyph-end");
+            startDot.style.fill = head.color;
+            endDot.style.stroke = tail.color;
+            svg.appendChild(startDot); svg.appendChild(endDot);
+            container.appendChild(svg);
+            // 笔画宽度按真实缩放比反算成 user 单位（不能用 non-scaling-stroke，会和 dasharray 打架）
+            const r0 = svg.getBoundingClientRect();
+            const scale = (r0.width && r0.height) ? Math.min(r0.width / w, r0.height / h) : 1;
+            const unit = 1 / scale;
+            segments.forEach(s => { s.el.style.strokeWidth = 6 * unit; });
+            startDot.setAttribute("r", 9 * unit);
+            endDot.setAttribute("r", 8.1 * unit);
+            endDot.style.strokeWidth = 3.7 * unit;
+            const plen = pts => { let t = 0; for (let i = 1; i < pts.length; i++) t += Math.hypot(pts[i].x - pts[i-1].x, pts[i].y - pts[i-1].y); return t; };
+            const lens = segments.map(s => plen(s.pts));
+            const total = lens.reduce((a, b) => a + b, 0) || 1;
+            let acc = 0;
+            segments.forEach((s, i) => {
+                s.el.style.strokeDasharray = lens[i];
+                s.el.style.strokeDashoffset = lens[i];
+                s.delay = (acc / total) * CHAIN_DRAW_MS;
+                s.dur = (lens[i] / total) * CHAIN_DRAW_MS;
+                acc += lens[i];
+            });
+            endDot.style.animationDelay = CHAIN_DRAW_MS + "ms";
+            requestAnimationFrame(() => {
+                segments.forEach(s => {
+                    s.el.style.transition = `stroke-dashoffset ${s.dur}ms linear ${s.delay}ms`;
+                    s.el.style.strokeDashoffset = "0";
+                });
+                svg.classList.add("drawn");
+            });
+        }
+
+        const LEVEL_COUNTS = [5, 7, 9, 11, 13, 15, 17, 19, 22, 26];
+
+        function playReward() {
+            const path = randomPath(9);
+            const el = document.getElementById("screen-reward");
+            el.classList.remove("screen-enter"); void el.offsetWidth; el.classList.add("screen-enter");
+            renderPathGlyph(document.getElementById("reward-glyph"), path);
+            document.getElementById("reward-sequence").textContent = path.join("").toUpperCase();
+            const p = document.querySelector(".sentence-roll");
+            p.innerHTML = "";
+            "Trust the road you tread, it already knows your name.".split(/\s+/).forEach((w, i) => {
+                const s = document.createElement("span");
+                s.className = "word"; s.textContent = w;
+                s.style.animationDelay = (i * 70) + "ms";
+                p.appendChild(s); p.appendChild(document.createTextNode(" "));
+            });
+        }
+
+        function playFinal() {
+            const el = document.getElementById("screen-final");
+            el.classList.remove("screen-enter"); void el.offsetWidth; el.classList.add("screen-enter");
+            renderFinalChain(document.getElementById("final-glyph"),
+                LEVEL_COUNTS.map(n => randomPath(n)));
+        }
+
+        document.getElementById("re-reward").addEventListener("click", playReward);
+        document.getElementById("re-final").addEventListener("click", playFinal);
+        playReward();
+        playFinal();
+    </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# 依赖（npm install 会装回来）
+node_modules/
+
+# 密钥：DeepSeek API key 放在这里，绝不能进仓库（照 .env.example 自己建一份）
+.env
+
+# 本机的编辑器 / 工具配置
+.claude/
+.DS_Store
+*.log

@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unbroken · 项目介绍</title>
+<style>*{margin:0}</style>
+</head>
+<body>
+<style>
+    :root {
+        --ground: #fff7f0;
+        --ground2: #ffeef2;
+        --ink: #3a3145;
+        --stroke: #45b3a3;
+        --rose: #ef6488;
+        --hair: rgba(58, 49, 69, 0.14);
+        --key-off: rgba(58, 49, 69, 0.07);
+        --panel: rgba(255, 255, 255, 0.62);
+
+        --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue",
+                "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --ground: #221d29;
+            --ground2: #2b2333;
+            --ink: #f3ecef;
+            --stroke: #5fd4c0;
+            --rose: #ff92ac;
+            --hair: rgba(243, 236, 239, 0.16);
+            --key-off: rgba(243, 236, 239, 0.08);
+            --panel: rgba(255, 255, 255, 0.05);
+        }
+    }
+
+    :root[data-theme="dark"] {
+        --ground: #221d29;
+        --ground2: #2b2333;
+        --ink: #f3ecef;
+        --stroke: #5fd4c0;
+        --rose: #ff92ac;
+        --hair: rgba(243, 236, 239, 0.16);
+        --key-off: rgba(243, 236, 239, 0.08);
+        --panel: rgba(255, 255, 255, 0.05);
+    }
+
+    :root[data-theme="light"] {
+        --ground: #fff7f0;
+        --ground2: #ffeef2;
+        --ink: #3a3145;
+        --stroke: #45b3a3;
+        --rose: #ef6488;
+        --hair: rgba(58, 49, 69, 0.14);
+        --key-off: rgba(58, 49, 69, 0.07);
+        --panel: rgba(255, 255, 255, 0.62);
+    }
+
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(170deg, var(--ground) 0%, var(--ground2) 100%);
+        background-attachment: fixed;
+        color: var(--ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---------- 幻灯片骨架 ---------- */
+    .deck {
+        position: relative;
+    }
+
+    .slide {
+        min-height: 100vh;
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        padding: 92px 7vw 116px;
+        max-width: 1180px;
+        margin: 0 auto;
+    }
+
+    .slide.is-active {
+        display: flex;
+    }
+
+    .slide.is-active > * {
+        animation: rise 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .slide.is-active > *:nth-child(1) { animation-delay: 0.02s; }
+    .slide.is-active > *:nth-child(2) { animation-delay: 0.08s; }
+    .slide.is-active > *:nth-child(3) { animation-delay: 0.15s; }
+    .slide.is-active > *:nth-child(4) { animation-delay: 0.22s; }
+
+    @keyframes rise {
+        from { opacity: 0; transform: translateY(16px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ---------- 排版 ---------- */
+    .eyebrow {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.26em;
+        text-transform: uppercase;
+        color: var(--rose);
+        margin: 0 0 22px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .eyebrow .sep {
+        color: var(--ink);
+        opacity: 0.28;
+        font-weight: 400;
+    }
+
+    .eyebrow .tag {
+        color: var(--stroke);
+        letter-spacing: 0.14em;
+        padding-left: 10px;
+        border-left: 1px solid currentColor;
+        opacity: 0.8;
+    }
+
+    h1 {
+        font-size: clamp(52px, 11vw, 128px);
+        font-weight: 800;
+        letter-spacing: -0.035em;
+        line-height: 0.92;
+        margin: 0;
+        text-wrap: balance;
+    }
+
+    h2 {
+        font-size: clamp(28px, 4.4vw, 46px);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.24;
+        margin: 0 0 20px;
+        text-wrap: balance;
+    }
+
+    .lede {
+        font-size: clamp(17px, 2.1vw, 21px);
+        line-height: 1.85;
+        margin: 0;
+        max-width: 34em;
+        opacity: 0.78;
+    }
+
+    .lede + .lede {
+        margin-top: 14px;
+    }
+
+    .lede strong {
+        font-weight: 700;
+        opacity: 1;
+        color: var(--stroke);
+    }
+
+    .note {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        letter-spacing: 0.06em;
+        line-height: 1.85;
+        opacity: 0.5;
+        margin: 0;
+    }
+
+    /* ---------- 两栏 ---------- */
+    .cols {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: clamp(28px, 5vw, 64px);
+        align-items: center;
+    }
+
+    .cols.narrow-left {
+        grid-template-columns: minmax(0, 0.82fr) minmax(0, 1fr);
+    }
+
+    @media (max-width: 860px) {
+        .cols,
+        .cols.narrow-left {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+
+    .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+    }
+
+    /* ---------- 图形舞台 ---------- */
+    .stage {
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        max-height: 46vh;
+    }
+
+    .stage svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+    }
+
+    .glyph-line {
+        fill: none;
+        stroke: var(--stroke);
+        stroke-width: 3.4px;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        vector-effect: non-scaling-stroke;
+    }
+
+    .glyph-start {
+        fill: var(--stroke);
+    }
+
+    .glyph-end {
+        fill: var(--ground);
+        stroke: var(--rose);
+        stroke-width: 2.4px;
+        vector-effect: non-scaling-stroke;
+    }
+
+    .kb-key {
+        fill: var(--key-off);
+    }
+
+    .kb-key.on {
+        fill: color-mix(in srgb, var(--stroke) 22%, transparent);
+    }
+
+    /* 键盘的 viewBox 放大了 30 倍，就是为了让这里的字号落在正常区间，
+       免得撞上浏览器的最小字号设置 */
+    .kb-label {
+        font-family: var(--mono);
+        font-size: 10.2px;
+        font-weight: 700;
+        text-anchor: middle;
+        dominant-baseline: central;
+        fill: var(--ink);
+        opacity: 0.32;
+    }
+
+    .kb-label.on {
+        opacity: 0.9;
+    }
+
+    /* 键盘卸掉字符之后：26 个点，39 条边 */
+    .graph-edge {
+        stroke: var(--ink);
+        stroke-width: 1.4px;
+        vector-effect: non-scaling-stroke;
+        opacity: 0.2;
+    }
+
+    .graph-node {
+        fill: var(--stroke);
+        transform-box: fill-box;
+        transform-origin: center;
+    }
+
+    @keyframes edge-in {
+        from { opacity: 0; }
+        to   { opacity: 0.2; }
+    }
+
+    @keyframes node-in {
+        from { opacity: 0; transform: scale(0.2); }
+        to   { opacity: 1; transform: scale(1); }
+    }
+
+    /* ---------- 数据块 ---------- */
+    .facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 34px;
+        margin: 0;
+        padding: 0;
+    }
+
+    .fact {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .fact dt {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        opacity: 0.42;
+    }
+
+    .fact dd {
+        margin: 0;
+        font-size: clamp(26px, 3.6vw, 40px);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        color: var(--stroke);
+    }
+
+    .fact dd small {
+        font-size: 0.42em;
+        font-weight: 600;
+        opacity: 0.55;
+        margin-left: 3px;
+        letter-spacing: 0;
+        color: var(--ink);
+    }
+
+    /* ---------- 关卡坡度 ---------- */
+    .ramp {
+        display: grid;
+        grid-template-columns: repeat(10, 1fr);
+        align-items: end;
+        gap: clamp(6px, 1.4vw, 14px);
+        height: clamp(150px, 26vh, 240px);
+    }
+
+    .ramp-bar {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 8px;
+        height: 100%;
+    }
+
+    .ramp-fill {
+        width: 100%;
+        border-radius: 5px 5px 2px 2px;
+        background: var(--stroke);
+        opacity: 0.9;
+        transform-origin: bottom;
+    }
+
+    .slide.is-active .ramp-fill {
+        animation: grow 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    @keyframes grow {
+        from { transform: scaleY(0.02); }
+        to   { transform: scaleY(1); }
+    }
+
+    .ramp-num {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 700;
+        opacity: 0.75;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .ramp-lv {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        opacity: 0.34;
+        font-variant-numeric: tabular-nums;
+    }
+
+    @media (max-width: 620px) {
+        .ramp-num {
+            font-size: 10px;
+        }
+
+        .ramp-lv {
+            display: none;
+        }
+    }
+
+    /* ---------- 流程 ---------- */
+    .flow {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        border-left: 1px solid var(--hair);
+        padding-left: 26px;
+        margin-left: 6px;
+    }
+
+    .flow-step {
+        position: relative;
+        padding: 15px 0;
+    }
+
+    .flow-step::before {
+        content: "";
+        position: absolute;
+        left: -31px;
+        top: 22px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--stroke);
+    }
+
+    .flow-step:last-child::before {
+        background: var(--ground);
+        border: 2px solid var(--rose);
+    }
+
+    .flow-k {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        opacity: 0.42;
+        margin: 0 0 5px;
+    }
+
+    .flow-v {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.7;
+    }
+
+    code {
+        font-family: var(--mono);
+        font-size: 0.88em;
+        background: var(--panel);
+        border: 1px solid var(--hair);
+        border-radius: 5px;
+        padding: 1px 6px;
+        white-space: nowrap;
+    }
+
+    /* ---------- 主题色带 ---------- */
+    .themes {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 14px;
+    }
+
+    @media (max-width: 620px) {
+        .themes {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    .theme {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+    }
+
+    .theme-swatch {
+        height: 46px;
+        border-radius: 10px;
+        display: flex;
+        overflow: hidden;
+        box-shadow: 0 3px 12px rgba(58, 49, 69, 0.1);
+    }
+
+    .theme-swatch i {
+        flex: 1;
+    }
+
+    .theme-name {
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .theme-meta {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        opacity: 0.42;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* ---------- 滚词演示 ---------- */
+    .roll-window {
+        height: 74px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(180deg, transparent, #000 34%, #000 66%, transparent);
+        mask-image: linear-gradient(180deg, transparent, #000 34%, #000 66%, transparent);
+        border-radius: 12px;
+        background: var(--panel);
+        border: 1px solid var(--hair);
+    }
+
+    .roll-word {
+        font-family: var(--mono);
+        font-size: clamp(20px, 3vw, 30px);
+        font-weight: 800;
+        letter-spacing: 3px;
+        color: var(--rose);
+        white-space: nowrap;
+        animation: roll 420ms cubic-bezier(0.33, 0, 0.35, 1) both;
+    }
+
+    @keyframes roll {
+        0%   { opacity: 0; transform: translateY(-62px); }
+        26%  { opacity: 1; transform: translateY(0); }
+        68%  { opacity: 1; transform: translateY(0); }
+        100% { opacity: 0; transform: translateY(62px); }
+    }
+
+    /* ---------- 封面 ---------- */
+    .cover-title {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+    }
+
+    .cover-sub {
+        font-family: var(--mono);
+        font-size: clamp(13px, 1.7vw, 16px);
+        letter-spacing: 0.42em;
+        text-transform: uppercase;
+        opacity: 0.46;
+    }
+
+    .cover-line {
+        font-size: clamp(16px, 2vw, 19px);
+        line-height: 1.8;
+        opacity: 0.72;
+        max-width: 22em;
+    }
+
+    /* ---------- 导航 ---------- */
+    .hud {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 0 7vw 22px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        pointer-events: none;
+        z-index: 10;
+    }
+
+    .hud-track {
+        flex: 1;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--hair);
+        overflow: hidden;
+    }
+
+    /* 进度是一条不断延长的线——这份 deck 本身也是一笔画 */
+    .hud-line {
+        height: 100%;
+        border-radius: 2px;
+        background: var(--stroke);
+        width: 10%;
+        transition: width 460ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .hud-count {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        opacity: 0.5;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .hud-btns {
+        display: flex;
+        gap: 8px;
+        pointer-events: auto;
+    }
+
+    .hud-btns button {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 1px solid var(--hair);
+        background: var(--panel);
+        color: var(--ink);
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        transition: transform 0.12s ease, opacity 0.12s ease;
+    }
+
+    .hud-btns button:hover {
+        transform: scale(1.08);
+    }
+
+    .hud-btns button:disabled {
+        opacity: 0.3;
+        cursor: default;
+        transform: none;
+    }
+
+    .hud-btns button:focus-visible,
+    .replay:focus-visible {
+        outline: 2px solid var(--stroke);
+        outline-offset: 3px;
+    }
+
+    .replay {
+        align-self: flex-start;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink);
+        opacity: 0.5;
+        background: none;
+        border: 1px solid var(--hair);
+        border-radius: 999px;
+        padding: 7px 14px;
+        cursor: pointer;
+        transition: opacity 0.15s ease, border-color 0.15s ease;
+    }
+
+    .replay:hover {
+        opacity: 1;
+        border-color: var(--stroke);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .slide.is-active > *,
+        .slide.is-active .ramp-fill,
+        .roll-word {
+            animation: none;
+            opacity: 1;
+            transform: none;
+        }
+
+        .hud-line {
+            transition: none;
+        }
+    }
+</style>
+
+<div class="deck" id="deck">
+
+    <!-- 01 封面 -->
+    <section class="slide is-active">
+        <div class="cols narrow-left">
+            <div class="cover-title">
+                <p class="cover-sub">键盘一笔画</p>
+                <h1>Unbroken</h1>
+                <p class="cover-line">
+                    在键盘上一笔走完这一关的所有键。
+                    走完了，AI 会拿你走过的字母写一句话给你。
+                </p>
+            </div>
+            <div class="stage" id="stage-cover"></div>
+        </div>
+    </section>
+
+    <!-- 02 是什么 -->
+    <section class="slide">
+        <p class="eyebrow"><span>02</span><span class="sep">/ 10</span><span class="tag">是什么</span></p>
+        <h2>一个只用一根手指、也只用一条线的小游戏</h2>
+        <p class="lede">
+            每一关给你键盘上的一组键。从任意一个键开始，只能走到<strong>物理相邻</strong>的键，
+            每个键只能踩一次，把这一关所有的键都走完——中途不能断，这就是一笔画。
+        </p>
+        <p class="lede">
+            玩法一句话讲得完，难度全在路线规划上：第一关 5 个键，第十关 26 个键，整块键盘。
+        </p>
+        <dl class="facts">
+            <div class="fact"><dt>关卡</dt><dd>10</dd></div>
+            <div class="fact"><dt>首关键数</dt><dd>5</dd></div>
+            <div class="fact"><dt>末关键数</dt><dd>26<small>全键盘</small></dd></div>
+            <div class="fact"><dt>操作</dt><dd>1<small>个键 / 步</small></dd></div>
+        </dl>
+    </section>
+
+    <!-- 03 规则 -->
+    <section class="slide">
+        <p class="eyebrow"><span>03</span><span class="sep">/ 10</span><span class="tag">规则</span></p>
+        <div class="cols">
+            <div class="stack">
+                <h2>相邻，只算上下左右</h2>
+                <p class="lede">
+                    Q 的邻居是 W 和 A，不含斜向的 S。这条约束让键盘变成一张 26 个点的稀疏图，
+                    也让"下一步往哪走"真的需要想一下。
+                </p>
+                <p class="note">
+                    关卡不是手写的：程序在这张图上回溯搜索一条指定长度的路径，
+                    带步数预算防止卡死。所以<strong>每一关都保证有解</strong>，
+                    而且每次打开都不一样。
+                </p>
+                <button class="replay" data-replay="kb">换一条路线</button>
+            </div>
+            <div class="stage" id="stage-kb"></div>
+        </div>
+    </section>
+
+    <!-- 04 坡度 -->
+    <section class="slide">
+        <p class="eyebrow"><span>04</span><span class="sep">/ 10</span><span class="tag">难度</span></p>
+        <h2>十关，从五个键铺到整块键盘</h2>
+        <div class="ramp" id="ramp"></div>
+        <p class="note">
+            每关键数：5 · 7 · 9 · 11 · 13 · 15 · 17 · 19 · 22 · 26
+            &nbsp;|&nbsp; 到第九关，22 个键已经超过任意两行之和（10 + 9），路线必须三行都用上
+        </p>
+    </section>
+
+    <!-- 05 AI -->
+    <section class="slide">
+        <p class="eyebrow"><span>05</span><span class="sep">/ 10</span><span class="tag">奖励</span></p>
+        <div class="cols">
+            <div class="stack">
+                <h2>走完之后，那句话是现写的</h2>
+                <div class="flow">
+                    <div class="flow-step">
+                        <p class="flow-k">路径</p>
+                        <p class="flow-v">你走过的字母，比如 <code>T R E W Q A S D F G</code></p>
+                    </div>
+                    <div class="flow-step">
+                        <p class="flow-k">抽样</p>
+                        <p class="flow-v">保持原顺序随机抽 5 个，避免每次都是同一批字母</p>
+                    </div>
+                    <div class="flow-step">
+                        <p class="flow-k">生成</p>
+                        <p class="flow-v">后端调 DeepSeek，要求写一句<strong>含这几个字母</strong>的鼓励话</p>
+                    </div>
+                    <div class="flow-step">
+                        <p class="flow-k">校验</p>
+                        <p class="flow-v">服务端抽标签、验字母、卡长度；模型抽风就退回本地词库</p>
+                    </div>
+                    <div class="flow-step">
+                        <p class="flow-k">呈现</p>
+                        <p class="flow-v">句子逐词从上方滚落，不是"啪"地蹦出来</p>
+                    </div>
+                </div>
+            </div>
+            <div class="stack">
+                <p class="note">等待期间的画面 —— 不是转圈，是你这关字母在词库里对应的词一个个滚过：</p>
+                <div class="roll-window"><span class="roll-word" id="roll-word">TREASURED</span></div>
+                <p class="note">
+                    本地词库 26 组 / 156 个词，是断网、超时、没配 key 时的兜底。<br>
+                    观众看到的永远是词在滚，不是加载动画。
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 06 印记 -->
+    <section class="slide">
+        <p class="eyebrow"><span>06</span><span class="sep">/ 10</span><span class="tag">印记</span></p>
+        <div class="cols narrow-left">
+            <div class="stack">
+                <h2>每一关会留下一枚只属于它的图形</h2>
+                <p class="lede">
+                    通关页把你刚画的线从键盘上取下来，单独重画一遍——一次描完，中途不断。
+                    起点是实心的落笔，终点是空心的收笔。
+                </p>
+                <p class="note">路线是随机生成的，所以这枚图形每一局都不同。</p>
+                <button class="replay" data-replay="marks">再抽三枚</button>
+            </div>
+            <div class="stage" id="stage-marks" style="aspect-ratio: 3 / 2;"></div>
+        </div>
+    </section>
+
+    <!-- 07 终局 -->
+    <section class="slide">
+        <p class="eyebrow"><span>07</span><span class="sep">/ 10</span><span class="tag">终局</span></p>
+        <div class="cols">
+            <div class="stack">
+                <h2>十关的笔迹，接成一条线</h2>
+                <p class="lede">
+                    每一段绕自己的起点旋转 45° 的倍数，再平移到上一段的终点，
+                    接缝严丝合缝。转角随机——<strong>所以这条线只出现过这一次</strong>。
+                </p>
+                <p class="note">
+                    颜色一段一段换，从第一关的主题色一路走到第十关。<br>
+                    全程 2.6 秒匀速画完：长的关卡画得久，这件事本身就是信息。
+                </p>
+                <button class="replay" data-replay="chain">换一条随机长线</button>
+            </div>
+            <div class="stage" id="stage-chain"></div>
+        </div>
+    </section>
+
+    <!-- 08 主题 -->
+    <section class="slide">
+        <p class="eyebrow"><span>08</span><span class="sep">/ 10</span><span class="tag">一关一世界</span></p>
+        <h2>十关十套配色，也是十套音色</h2>
+        <div class="themes" id="themes"></div>
+        <p class="note">
+            切关时颜色不是直接跳的：主题色注册成 <code>@property</code> 的可过渡自定义属性，
+            620ms 淡进下一关。音色同理，每关换音阶、波形和泛音——全部 Web Audio 实时合成，不加载任何音频文件。
+        </p>
+    </section>
+
+    <!-- 09 初衷 -->
+    <section class="slide">
+        <p class="eyebrow"><span></span><span class="sep"></span><span class="tag">初衷</span></p>
+        <div class="cols">
+            <div class="stack">
+                <h2>键盘不只是打字的工具，<br>更是一种交互方式</h2>
+                <p class="lede">
+                    我们每天按几千次键，但键盘一直是透明的——按下去，字出来，键本身消失了。
+                    它只被当成通往字符的通道。
+                </p>
+                <p class="lede">
+                    一笔画把它还原成一张<strong>地图</strong>。Q 挨着 W，W 挨着 S，
+                    这些位置关系从出厂那天就在，只是从来没被当成内容用过。
+                    在这里你不是在打字，你是在这张图上走路。
+                </p>
+            </div>
+            <div class="stack">
+                <div class="stage" id="stage-graph" style="aspect-ratio: 3 / 1;"></div>
+                <p class="note">
+                    26 个点，39 条边。这就是键盘卸掉字符之后剩下的东西。
+                </p>
+                <p class="note">
+                    盲打本来就靠位置而不是靠字母——那份空间感一直在你手上，
+                    这个游戏只是把它显式地摆出来。<br><br>
+                    同一块键盘，先是输入设备，然后是棋盘，最后是画布；
+                    等你走完，AI 用你走过的字母写成一句话——它又变回了语言。
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 10 名字 -->
+    <section class="slide">
+        <p class="eyebrow"><span></span><span class="sep"></span><span class="tag">名字</span></p>
+        <div class="cols narrow-left">
+            <div class="stack">
+                <h2>为什么叫 Unbroken</h2>
+                <p class="lede">
+                    一笔画的规则是这条线不能断、键不能重走；
+                    十关接起来之后，那条长线也没断。
+                </p>
+                <p class="lede">
+                    而 <strong>UNBROKEN</strong> 本来就躺在词库的 U 组里——
+                    等 AI 的时候它会滚过屏幕，AI 也可能把它写进给你的那句话。
+                </p>
+                <p class="note">名字、玩法、祝福语，是同一个词。</p>
+            </div>
+            <div class="stage" id="stage-end" style="aspect-ratio: 1 / 1;"></div>
+        </div>
+    </section>
+
+</div>
+
+<div class="hud">
+    <span class="hud-count" id="hud-count">01 / 10</span>
+    <div class="hud-track"><div class="hud-line" id="hud-line"></div></div>
+    <div class="hud-btns">
+        <button id="prev" aria-label="上一页">←</button>
+        <button id="next" aria-label="下一页">→</button>
+    </div>
+</div>
+
+<script>
+    (() => {
+        "use strict";
+
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const SVG_NS = "http://www.w3.org/2000/svg";
+
+        // ---- 键盘模型：和游戏里是同一套 ----
+        const ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"].map((r) => r.split(""));
+        const keyInfo = {};
+        ROWS.forEach((row, r) => row.forEach((k, c) => (keyInfo[k] = { row: r, col: c })));
+
+        const ADJ = {};
+        Object.keys(keyInfo).forEach((k) => (ADJ[k] = []));
+        Object.entries(keyInfo).forEach(([k, p]) => {
+            Object.entries(keyInfo).forEach(([o, q]) => {
+                if (k === o) return;
+                const sameRow = p.row === q.row && Math.abs(p.col - q.col) === 1;
+                const sameCol = p.col === q.col && Math.abs(p.row - q.row) === 1;
+                if (sameRow || sameCol) ADJ[k].push(o);
+            });
+        });
+
+        const LEVEL_COUNTS = [5, 7, 9, 11, 13, 15, 17, 19, 22, 26];
+
+        const THEMES = [
+            { name: "晨光",   primary: "#ff8fa3", accent: "#45b3a3" },
+            { name: "薄荷",   primary: "#3fb99a", accent: "#3f9ec9" },
+            { name: "海雾",   primary: "#6f9fd8", accent: "#5a8ba0" },
+            { name: "蜜橘",   primary: "#f0a13a", accent: "#3d947a" },
+            { name: "薰衣草", primary: "#a982d6", accent: "#4f7fbc" },
+            { name: "苔原",   primary: "#8a9a4f", accent: "#8a6840" },
+            { name: "暮云",   primary: "#d9698f", accent: "#bc7c33" },
+            { name: "霜夜",   primary: "#5aa8cc", accent: "#3fa5b8" },
+            { name: "星火",   primary: "#d95f43", accent: "#c2811a" },
+            { name: "极光",   primary: "#8c7de0", accent: "#1ea892" },
+        ];
+
+        const shuffled = (a) => {
+            const b = a.slice();
+            for (let i = b.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [b[i], b[j]] = [b[j], b[i]];
+            }
+            return b;
+        };
+
+        // 回溯找一条长度为 n 的不重复相邻路径，带步数预算——和游戏同款
+        function findPath(n) {
+            const keys = Object.keys(keyInfo);
+            for (let attempt = 0; attempt < 60; attempt++) {
+                const start = keys[Math.floor(Math.random() * keys.length)];
+                const seen = new Set([start]);
+                const path = [start];
+                let budget = 20000;
+
+                const walk = () => {
+                    if (path.length === n) return true;
+                    if (budget-- <= 0) return false;
+                    for (const nx of shuffled(ADJ[path[path.length - 1]])) {
+                        if (seen.has(nx)) continue;
+                        seen.add(nx);
+                        path.push(nx);
+                        if (walk()) return true;
+                        seen.delete(nx);
+                        path.pop();
+                    }
+                    return false;
+                };
+
+                if (walk()) return path;
+            }
+            return "qwert".split("");
+        }
+
+        const el = (name, attrs) => {
+            const node = document.createElementNS(SVG_NS, name);
+            Object.entries(attrs || {}).forEach(([k, v]) => node.setAttribute(k, v));
+            return node;
+        };
+
+        function makeSvg(minX, minY, w, h, cls) {
+            const svg = el("svg", {
+                viewBox: `${minX} ${minY} ${w} ${h}`,
+                preserveAspectRatio: "xMidYMid meet",
+                "aria-hidden": "true",
+            });
+            if (cls) svg.setAttribute("class", cls);
+            return svg;
+        }
+
+        // 一次描完：整条线从头画到尾，中间不断
+        function drawOn(line, ms, delay) {
+            const len = line.getTotalLength();
+            if (reduced) return len;
+            line.style.strokeDasharray = len;
+            line.style.strokeDashoffset = len;
+            requestAnimationFrame(() => {
+                line.style.transition =
+                    `stroke-dashoffset ${ms}ms cubic-bezier(0.33, 0, 0.35, 1) ${delay || 0}ms`;
+                line.style.strokeDashoffset = "0";
+            });
+            return len;
+        }
+
+        function pathPoints(path) {
+            return path.map((k) => keyInfo[k]).filter(Boolean).map((p) => ({ x: p.col, y: p.row }));
+        }
+
+        // ---- 单笔印记 ----
+        function renderGlyph(container, path, opts) {
+            const { ms = 900, delay = 0, dots = true } = opts || {};
+            container.innerHTML = "";
+            const pts = pathPoints(path);
+            if (pts.length < 2) return;
+
+            const pad = 0.6;
+            const xs = pts.map((p) => p.x);
+            const ys = pts.map((p) => p.y);
+            const minX = Math.min(...xs) - pad;
+            const minY = Math.min(...ys) - pad;
+            const svg = makeSvg(minX, minY, Math.max(...xs) + pad - minX, Math.max(...ys) + pad - minY);
+
+            const line = el("polyline", {
+                class: "glyph-line",
+                points: pts.map((p) => `${p.x},${p.y}`).join(" "),
+            });
+            svg.appendChild(line);
+
+            if (dots) {
+                svg.appendChild(el("circle", { class: "glyph-start", cx: pts[0].x, cy: pts[0].y, r: 0.17 }));
+                const last = pts[pts.length - 1];
+                svg.appendChild(el("circle", { class: "glyph-end", cx: last.x, cy: last.y, r: 0.15 }));
+            }
+
+            container.appendChild(svg);
+            drawOn(line, ms, delay);
+        }
+
+        // ---- 键盘 + 走线 ----
+        const KB = 30; // 放大倍数，见 .kb-label 的注释
+
+        function renderKeyboard(container, path) {
+            container.innerHTML = "";
+            const onPath = new Set(path);
+            const svg = makeSvg(-0.7 * KB, -0.7 * KB, 10.4 * KB, 3.4 * KB);
+
+            ROWS.forEach((row, r) => {
+                row.forEach((k, c) => {
+                    const hot = onPath.has(k);
+                    svg.appendChild(el("rect", {
+                        class: "kb-key" + (hot ? " on" : ""),
+                        x: (c - 0.42) * KB, y: (r - 0.42) * KB,
+                        width: 0.84 * KB, height: 0.84 * KB, rx: 0.16 * KB,
+                    }));
+                    const label = el("text", {
+                        class: "kb-label" + (hot ? " on" : ""),
+                        x: c * KB, y: r * KB,
+                    });
+                    label.textContent = k.toUpperCase();
+                    svg.appendChild(label);
+                });
+            });
+
+            const pts = pathPoints(path).map((p) => ({ x: p.x * KB, y: p.y * KB }));
+            const line = el("polyline", {
+                class: "glyph-line",
+                points: pts.map((p) => `${p.x},${p.y}`).join(" "),
+            });
+            svg.appendChild(line);
+            svg.appendChild(el("circle", {
+                class: "glyph-start", cx: pts[0].x, cy: pts[0].y, r: 0.15 * KB,
+            }));
+            container.appendChild(svg);
+            drawOn(line, 1500, 200);
+        }
+
+        // ---- 键盘的图结构：把字符卸掉，只剩点和边 ----
+        function renderGraph(container) {
+            container.innerHTML = "";
+            const svg = makeSvg(-0.6, -0.6, 10.2, 3.2);
+
+            const done = new Set();
+            const edges = [];
+            Object.entries(ADJ).forEach(([k, list]) => {
+                list.forEach((o) => {
+                    const id = [k, o].sort().join("");
+                    if (done.has(id)) return;
+                    done.add(id);
+                    edges.push([keyInfo[k], keyInfo[o]]);
+                });
+            });
+
+            edges.forEach(([a, b], i) => {
+                const line = el("line", {
+                    class: "graph-edge",
+                    x1: a.col, y1: a.row, x2: b.col, y2: b.row,
+                });
+                if (!reduced) line.style.animation = `edge-in 320ms ease-out ${i * 16}ms both`;
+                svg.appendChild(line);
+            });
+
+            Object.values(keyInfo).forEach((p, i) => {
+                const dot = el("circle", { class: "graph-node", cx: p.col, cy: p.row, r: 0.13 });
+                if (!reduced) {
+                    dot.style.animation =
+                        `node-in 300ms cubic-bezier(0.34, 1.56, 0.64, 1) ${680 + i * 15}ms both`;
+                }
+                svg.appendChild(dot);
+            });
+
+            container.appendChild(svg);
+        }
+
+        // ---- 三枚印记并排 ----
+        function renderMarks(container) {
+            container.innerHTML = "";
+            const wrap = document.createElement("div");
+            wrap.style.cssText = "display:grid;grid-template-columns:repeat(3,1fr);gap:16px;height:100%;";
+            [9, 13, 19].forEach((n, i) => {
+                const cell = document.createElement("div");
+                cell.style.cssText = "height:100%;min-width:0;";
+                wrap.appendChild(cell);
+                renderGlyph(cell, findPath(n), { ms: 820, delay: i * 260 });
+            });
+            container.appendChild(wrap);
+        }
+
+        // ---- 终局长线：十段首尾相接 ----
+        const CHAIN_TURNS = [-135, -90, -45, 45, 90, 135];
+
+        function renderChain(container) {
+            container.innerHTML = "";
+            const segments = [];
+            let cursor = { x: 0, y: 0 };
+            let angle = 0;
+
+            LEVEL_COUNTS.forEach((n, i) => {
+                const raw = pathPoints(findPath(n));
+                if (raw.length < 2) return;
+                if (segments.length) {
+                    angle += CHAIN_TURNS[Math.floor(Math.random() * CHAIN_TURNS.length)];
+                }
+                const rad = (angle * Math.PI) / 180;
+                const cos = Math.cos(rad);
+                const sin = Math.sin(rad);
+                const o = raw[0];
+                const pts = raw.map((p) => {
+                    const dx = p.x - o.x;
+                    const dy = p.y - o.y;
+                    return {
+                        x: cursor.x + dx * cos - dy * sin,
+                        y: cursor.y + dx * sin + dy * cos,
+                    };
+                });
+                cursor = pts[pts.length - 1];
+                segments.push({ pts, color: THEMES[i % THEMES.length].accent });
+            });
+            if (!segments.length) return;
+
+            const all = segments.flatMap((s) => s.pts);
+            const pad = 0.8;
+            const xs = all.map((p) => p.x);
+            const ys = all.map((p) => p.y);
+            const minX = Math.min(...xs) - pad;
+            const minY = Math.min(...ys) - pad;
+            const svg = makeSvg(minX, minY, Math.max(...xs) + pad - minX, Math.max(...ys) + pad - minY);
+
+            segments.forEach((s) => {
+                s.el = el("polyline", {
+                    class: "glyph-line",
+                    points: s.pts.map((p) => `${p.x},${p.y}`).join(" "),
+                });
+                s.el.style.stroke = s.color;
+                svg.appendChild(s.el);
+            });
+
+            const head = segments[0];
+            const tail = segments[segments.length - 1];
+            const start = el("circle", { class: "glyph-start", cx: head.pts[0].x, cy: head.pts[0].y, r: 0.34 });
+            start.style.fill = head.color;
+            svg.appendChild(start);
+            container.appendChild(svg);
+
+            if (reduced) return;
+
+            // 按各段长度分配时间，笔速全程恒定
+            const lens = segments.map((s) => s.el.getTotalLength());
+            const total = lens.reduce((a, b) => a + b, 0) || 1;
+            let acc = 0;
+            segments.forEach((s, i) => {
+                s.el.style.strokeDasharray = lens[i];
+                s.el.style.strokeDashoffset = lens[i];
+                s.delay = (acc / total) * 2600;
+                s.dur = (lens[i] / total) * 2600;
+                acc += lens[i];
+            });
+            requestAnimationFrame(() => {
+                segments.forEach((s) => {
+                    s.el.style.transition = `stroke-dashoffset ${s.dur}ms linear ${s.delay}ms`;
+                    s.el.style.strokeDashoffset = "0";
+                });
+            });
+        }
+
+        // ---- 静态内容 ----
+        const ramp = document.getElementById("ramp");
+        LEVEL_COUNTS.forEach((n, i) => {
+            const bar = document.createElement("div");
+            bar.className = "ramp-bar";
+            const num = document.createElement("span");
+            num.className = "ramp-num";
+            num.textContent = n;
+            const fill = document.createElement("div");
+            fill.className = "ramp-fill";
+            fill.style.height = (n / 26) * 100 + "%";
+            fill.style.animationDelay = i * 55 + "ms";
+            fill.style.background = THEMES[i].accent;
+            const lv = document.createElement("span");
+            lv.className = "ramp-lv";
+            lv.textContent = String(i + 1).padStart(2, "0");
+            bar.append(num, fill, lv);
+            ramp.appendChild(bar);
+        });
+
+        const themesEl = document.getElementById("themes");
+        THEMES.forEach((t, i) => {
+            const box = document.createElement("div");
+            box.className = "theme";
+            box.innerHTML =
+                `<div class="theme-swatch"><i style="background:${t.primary}"></i>` +
+                `<i style="background:${t.accent}"></i></div>` +
+                `<span class="theme-name">${t.name}</span>` +
+                `<span class="theme-meta">LV ${String(i + 1).padStart(2, "0")} · ${t.accent.toUpperCase()}</span>`;
+            themesEl.appendChild(box);
+        });
+
+        // ---- 滚词演示 ----
+        const WORDS = ["TREASURED", "RADIANT", "EVERGREEN", "AWAKE", "DARING",
+                       "UNBROKEN", "STEADY", "FEARLESS", "GOLDEN", "WHOLE"];
+        const rollEl = document.getElementById("roll-word");
+        let rollTimer = null;
+        let rollIdx = 0;
+
+        function startRoll() {
+            stopRoll();
+            const tick = () => {
+                rollEl.textContent = WORDS[rollIdx++ % WORDS.length];
+                rollEl.style.animation = "none";
+                void rollEl.offsetWidth;
+                rollEl.style.animation = "";
+            };
+            tick();
+            if (!reduced) rollTimer = setInterval(tick, 420);
+        }
+
+        function stopRoll() {
+            if (rollTimer) clearInterval(rollTimer);
+            rollTimer = null;
+        }
+
+        // ---- 每页进场时该放什么 ----
+        const scenes = {
+            0: () => renderGlyph(document.getElementById("stage-cover"), findPath(14), { ms: 1400, delay: 260 }),
+            2: () => renderKeyboard(document.getElementById("stage-kb"), findPath(11)),
+            4: startRoll,
+            5: () => renderMarks(document.getElementById("stage-marks")),
+            6: () => renderChain(document.getElementById("stage-chain")),
+            8: () => renderGraph(document.getElementById("stage-graph")),
+            9: () => renderGlyph(document.getElementById("stage-end"), findPath(17), { ms: 1500, delay: 300 }),
+        };
+
+        const replays = {
+            kb: scenes[2],
+            marks: scenes[5],
+            chain: scenes[6],
+        };
+
+        document.querySelectorAll("[data-replay]").forEach((btn) => {
+            btn.addEventListener("click", () => replays[btn.dataset.replay]());
+        });
+
+        // ---- 翻页 ----
+        const slides = Array.from(document.querySelectorAll(".slide"));
+
+        // 页码从实际页数算，加页删页不用回来改标注
+        const total = String(slides.length).padStart(2, "0");
+        slides.forEach((slide, i) => {
+            const eyebrow = slide.querySelector(".eyebrow");
+            if (!eyebrow) return;
+            const num = eyebrow.querySelector("span:not(.sep):not(.tag)");
+            const sep = eyebrow.querySelector(".sep");
+            if (num) num.textContent = String(i + 1).padStart(2, "0");
+            if (sep) sep.textContent = "/ " + total;
+        });
+
+        const lineEl = document.getElementById("hud-line");
+        const countEl = document.getElementById("hud-count");
+        const prevBtn = document.getElementById("prev");
+        const nextBtn = document.getElementById("next");
+        let idx = 0;
+
+        function go(next) {
+            const target = Math.min(slides.length - 1, Math.max(0, next));
+            if (target !== idx) {
+                slides[idx].classList.remove("is-active");
+                idx = target;
+                slides[idx].classList.add("is-active");
+            }
+            if (idx !== 4) stopRoll();
+            countEl.textContent =
+                String(idx + 1).padStart(2, "0") + " / " + String(slides.length).padStart(2, "0");
+            lineEl.style.width = ((idx + 1) / slides.length) * 100 + "%";
+            prevBtn.disabled = idx === 0;
+            nextBtn.disabled = idx === slides.length - 1;
+            window.scrollTo(0, 0);
+            if (scenes[idx]) scenes[idx]();
+        }
+
+        prevBtn.addEventListener("click", () => go(idx - 1));
+        nextBtn.addEventListener("click", () => go(idx + 1));
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
+                e.preventDefault();
+                go(idx + 1);
+            } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+                e.preventDefault();
+                go(idx - 1);
+            } else if (e.key === "Home") {
+                go(0);
+            } else if (e.key === "End") {
+                go(slides.length - 1);
+            }
+        });
+
+        let touchX = null;
+        document.addEventListener("touchstart", (e) => (touchX = e.changedTouches[0].clientX), { passive: true });
+        document.addEventListener("touchend", (e) => {
+            if (touchX === null) return;
+            const dx = e.changedTouches[0].clientX - touchX;
+            if (Math.abs(dx) > 60) go(idx + (dx < 0 ? 1 : -1));
+            touchX = null;
+        }, { passive: true });
+
+        go(0);
+    })();
+</script>
+
+</body>
+</html>

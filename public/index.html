@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#041211">
+    <title>Unbroken · 键盘一笔画</title>
+    <link rel="preload" href="fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/unbounded.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
+</head>
+<body class="on-home">
+    <!-- 背景：深色底 + 两团随配色变化、缓缓漂移的光 + 一层颗粒 -->
+    <div class="bg" aria-hidden="true">
+        <div class="bg-light bg-light-a"></div>
+        <div class="bg-light bg-light-b"></div>
+        <div class="bg-light bg-light-c"></div>
+        <canvas id="scene-canvas" class="scene-canvas"></canvas>
+        <div class="bg-grain"></div>
+    </div>
+    <!-- 画风调色、电影感的遮幅：盖在最上面但不挡操作 -->
+    <div class="grade" aria-hidden="true"></div>
+    <div class="cine-bars" aria-hidden="true"><span></span><span></span></div>
+
+    <header class="topbar">
+        <button class="brand" id="btn-brand" type="button" aria-label="Unbroken">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-word">UNBROKEN</span>
+        </button>
+        <div class="topbar-tools">
+            <label class="vol" aria-label="音量">
+                <input id="vol-slider" type="range" min="0" max="100" step="1" value="90" aria-label="音量">
+            </label>
+            <button id="btn-sound" class="icon-btn" type="button" aria-label="声音开关">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path class="sp" d="M4 9h4l5-4v14l-5-4H4z"/><path class="w1" d="M16 9.5a3.5 3.5 0 0 1 0 5"/><path class="w2" d="M18.5 7a7 7 0 0 1 0 10"/><path class="x" d="M16 9l5 6M21 9l-5 6"/></svg>
+            </button>
+            <button id="btn-style" class="icon-btn" type="button" aria-label="风格与音效"
+                    aria-expanded="false" aria-controls="style-panel">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.2 0 1.7-1 1.2-1.9-.5-1 .1-2.3 1.3-2.3h2.3a4 4 0 0 0 4-4c0-5.1-3.9-9.4-8.8-9.4z"/><circle class="dot" cx="7.6" cy="11.4" r="1.25"/><circle class="dot" cx="10.4" cy="7.3" r="1.25"/><circle class="dot" cx="15.1" cy="7.6" r="1.25"/></svg>
+            </button>
+            <button id="btn-settings" class="icon-btn" type="button" aria-label="菜单"
+                    aria-expanded="false" aria-controls="level-panel">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+            </button>
+
+            <div id="level-panel" class="level-panel" hidden>
+                <button id="btn-music-mode" type="button" class="panel-entry">
+                    <span class="panel-entry-icon" aria-hidden="true">♪</span>
+                    <span class="panel-entry-text">
+                        <span class="panel-entry-title">音乐模式</span>
+                        <span class="panel-entry-sub">十二件乐器，一块键盘</span>
+                    </span>
+                    <span class="panel-entry-arrow" aria-hidden="true">→</span>
+                </button>
+                <p class="panel-label">跳到某一关</p>
+                <div class="level-chips" id="level-chips" role="group" aria-label="选择关卡"></div>
+            </div>
+
+            <div id="style-panel" class="style-panel" hidden>
+                <div class="sp-head">
+                    <span class="sp-title">风格</span>
+                    <button id="sp-reset" class="sp-reset" type="button">恢复默认</button>
+                </div>
+                <p class="panel-label">情绪 <span class="panel-label-sub">决定音阶和灯光</span></p>
+                <div class="sp-chips" id="sp-moods" role="group" aria-label="情绪"></div>
+                <p class="panel-label">场景 <span class="panel-label-sub">决定键帽、背景和环境声</span></p>
+                <div class="sp-chips sp-scenes" id="sp-scenes" role="group" aria-label="场景"></div>
+                <p class="panel-label">声音与画面</p>
+                <div class="sp-row"><span class="sp-k">混响</span><div class="seg" id="sp-reverb" role="group" aria-label="混响"></div></div>
+                <div class="sp-row"><span class="sp-k">回声</span><div class="seg" id="sp-echo" role="group" aria-label="回声"></div></div>
+                <div class="sp-row"><span class="sp-k">画风</span><div class="seg" id="sp-tone" role="group" aria-label="画风"></div></div>
+                <div class="sp-toggles" id="sp-toggles" role="group" aria-label="效果开关"></div>
+            </div>
+        </div>
+    </header>
+
+    <div id="confetti" aria-hidden="true">
+        <canvas id="confetti-canvas"></canvas>
+        <div id="screen-bloom"></div>
+    </div>
+
+    <main id="app">
+
+        <!-- ============ 首页：键盘钉在屏幕上，文字从它前面滚过去 ============ -->
+        <section id="screen-home" class="screen">
+            <div class="home-stage">
+                <div class="kb-stage" id="stage-home"></div>
+            </div>
+
+            <div class="home-flow">
+                <div class="hpanel hpanel-hero" data-chapter="hero">
+                    <div class="hero-copy" id="hero-copy">
+                        <p class="kicker"><span>一笔画</span><span>键盘</span><span>乐器</span></p>
+                        <h1 class="wordmark">UNBROKEN</h1>
+                        <p class="hero-line">一条不能断的线，走完键盘上的每一个键。</p>
+                    </div>
+                    <div class="scroll-cue" id="scroll-cue" aria-hidden="true">
+                        <span class="scroll-cue-track"><span class="scroll-cue-dot"></span></span>
+                        <span class="scroll-cue-text">向下滑动</span>
+                    </div>
+                </div>
+
+                <div class="hpanel hpanel-rules" data-chapter="rules">
+                    <ol class="rules">
+                        <li class="rule reveal" data-demo="adjacent">
+                            <span class="rule-n">01</span>
+                            <div>
+                                <h3 class="rule-k">相邻</h3>
+                                <p class="rule-v">只能走到上下左右紧挨着的键。Q 的邻居是 W 和 A，斜着的 S 不算。</p>
+                            </div>
+                        </li>
+                        <li class="rule reveal" data-demo="once">
+                            <span class="rule-n">02</span>
+                            <div>
+                                <h3 class="rule-k">不重复</h3>
+                                <p class="rule-v">每个键只能踩一次。踩过的就熄了，回不去。</p>
+                            </div>
+                        </li>
+                        <li class="rule reveal" data-demo="complete">
+                            <span class="rule-n">03</span>
+                            <div>
+                                <h3 class="rule-k">走完</h3>
+                                <p class="rule-v">把这一关亮起来的键全部走过，中途一次都不能断——这就是一笔画。</p>
+                            </div>
+                        </li>
+                    </ol>
+                    <p class="rules-note reveal">一共 12 关，从 5 个键走到 40 个键。最后两关，数字和符号键也会加进来。</p>
+                </div>
+
+                <div class="hpanel hpanel-play" data-chapter="play">
+                    <div class="play-copy reveal">
+                        <p class="kicker"><span>顺带一提</span></p>
+                        <h2 class="play-title">这块键盘也是一件乐器</h2>
+                        <p class="play-sub">往右一格高一个音，往上一排高一个八度。<br>直接敲键盘，或者点它。按住不放音会一直延着，空格是延音踏板。</p>
+                    </div>
+                    <p class="play-trail" id="play-trail" aria-hidden="true"></p>
+                </div>
+
+                <div class="hpanel hpanel-start" data-chapter="start" id="panel-start">
+                    <button id="btn-start" class="start-stroke" aria-label="开始游戏">
+                        <span class="start-stroke-track">
+                            <span class="start-stroke-fill" id="start-stroke-fill"></span>
+                        </span>
+                        <span class="start-stroke-label" id="start-stroke-label">继续下滑，画完这一笔</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============ 关卡 ============ -->
+        <section id="screen-game" class="screen" hidden>
+            <div class="hud">
+                <div class="hud-level">
+                    <span class="hud-num" id="hud-num">01</span>
+                    <span class="hud-total">/ <span id="hud-total">12</span></span>
+                </div>
+                <div class="hud-theme" id="hud-theme"><span class="hud-dot"></span><span id="hud-theme-name">晨光</span><span class="hud-theme-en" id="hud-theme-en">Dawn</span></div>
+                <p class="hud-left" id="level-remaining"></p>
+            </div>
+            <div class="kb-stage stage-game" id="stage-game"></div>
+            <p id="feedback-msg" aria-live="polite"></p>
+            <div id="game-controls">
+                <button id="btn-undo" class="kbtn kbtn-mod"><span class="kbtn-k">⌫</span>撤销一步</button>
+                <button id="btn-restart" class="kbtn kbtn-mod"><span class="kbtn-k">↺</span>重来本关</button>
+                <button id="btn-hint" class="kbtn kbtn-accent"><span class="kbtn-k">⏎</span>提示</button>
+                <button id="btn-skip" class="kbtn kbtn-mod"><span class="kbtn-k">⇥</span><span class="kbtn-t">跳过本关</span></button>
+            </div>
+        </section>
+
+        <!-- ============ 过关 ============ -->
+        <section id="screen-reward" class="screen" hidden>
+            <p class="eyebrow">
+                <span id="reward-level-num">01</span>
+                <span class="eyebrow-total">/ <span id="reward-level-total">12</span></span>
+                <span class="eyebrow-tag">一笔未断</span>
+            </p>
+            <div class="kb-stage stage-reward" id="stage-reward"></div>
+            <p id="reward-sequence" class="sequence" aria-label="你走过的按键"></p>
+            <div id="reward-message" class="reward-card">
+                <div class="word-flash"></div>
+            </div>
+            <button id="btn-next" class="kbtn kbtn-accent kbtn-lg">下一关</button>
+        </section>
+
+        <!-- ============ 终局 ============ -->
+        <section id="screen-final" class="screen" hidden>
+            <p class="eyebrow">
+                <span id="final-level-num">12</span>
+                <span class="eyebrow-total">/ <span id="final-level-total">12</span></span>
+                <span class="eyebrow-tag">一笔到底</span>
+            </p>
+            <div class="kb-stage stage-final" id="stage-final">
+                <div class="chain-caption" id="chain-caption" aria-live="polite"></div>
+                <p class="stage-hint" id="final-hint">拖动可以转着看</p>
+            </div>
+            <p class="final-caption" id="final-caption">
+                每一关的笔迹都停在它那一层，首尾相接，一层一层盘上去。<br>
+                这座塔只出现过这一次。
+            </p>
+            <div id="final-message" class="reward-card"></div>
+            <button id="btn-restart-game" class="kbtn kbtn-accent kbtn-lg">再玩一次</button>
+        </section>
+
+        <!-- ============ 音乐模式 ============ -->
+        <section id="screen-music" class="screen" hidden>
+            <div class="music-bar">
+                <button id="btn-music-back" type="button" class="kbtn kbtn-mod kbtn-sm"><span class="kbtn-k">esc</span>返回</button>
+                <div class="music-title">
+                    <span class="music-inst" id="music-inst">钢琴</span>
+                    <span class="music-inst-en" id="music-inst-en">Piano</span>
+                </div>
+                <div class="key-ctl" role="group" aria-label="调和八度">
+                    <button class="kc-btn" id="key-down" type="button" aria-label="降半音" title="降半音（←）">−</button>
+                    <span class="kc-val"><span class="kc-name" id="key-name">1=C</span><span class="kc-sub" id="key-mode">大调</span></span>
+                    <button class="kc-btn" id="key-up" type="button" aria-label="升半音" title="升半音（→）">+</button>
+                    <span class="kc-sep" aria-hidden="true"></span>
+                    <button class="kc-btn" id="oct-down" type="button" aria-label="低八度" title="低八度（↓）">▾</button>
+                    <span class="kc-val kc-val-oct"><span class="kc-name" id="oct-name">0</span><span class="kc-sub">八度</span></span>
+                    <button class="kc-btn" id="oct-up" type="button" aria-label="高八度" title="高八度（↑）">▴</button>
+                </div>
+            </div>
+
+            <div class="kb-stage stage-music" id="stage-music"></div>
+
+            <div class="inst-bar">
+                <div class="inst-bank" id="inst-bank" role="group" aria-label="乐器组">
+                    <button type="button" class="bank-btn" data-bank="0">A 组</button>
+                    <button type="button" class="bank-btn" data-bank="1">B 组</button>
+                </div>
+                <span class="inst-bank-hint">F1–F12 选乐器 · Caps Lock 换组</span>
+            </div>
+            <div class="inst-row" id="inst-row" role="group" aria-label="乐器"></div>
+
+            <div class="score-box">
+                <div class="score-head">
+                    <span class="score-name" id="score-name">选一首曲子</span>
+                    <span class="score-hint" id="score-hint">下面挑一首，或者直接敲键盘随便弹</span>
+                </div>
+                <div class="score-notes" id="score-notes" aria-live="off"></div>
+                <div class="score-actions">
+                    <button id="btn-score-play" class="kbtn kbtn-accent kbtn-sm" disabled>▶ 试听</button>
+                    <button id="btn-score-follow" class="kbtn kbtn-mod kbtn-sm" disabled>跟弹</button>
+                    <button id="btn-score-edit" class="kbtn kbtn-mod kbtn-sm">✎ 编辑</button>
+                    <button id="btn-import" class="kbtn kbtn-mod kbtn-sm" title="支持简谱文本（.txt）、MIDI（.mid）和 MusicXML（.musicxml / .xml），也可以直接把文件拖进来">⤓ 导入乐谱</button>
+                    <button id="btn-listen" class="kbtn kbtn-mod kbtn-sm">🎙 听歌识曲</button>
+                    <input type="file" id="file-import" accept=".txt,.jianpu,.mid,.midi,.musicxml,.xml" hidden>
+                </div>
+
+                <div class="listen-panel" id="listen-panel" hidden aria-live="polite">
+                    <div class="listen-top">
+                        <span class="listen-dot" aria-hidden="true"></span>
+                        <span class="listen-status" id="listen-status">正在听……</span>
+                        <button id="btn-listen-stop" class="kbtn kbtn-accent kbtn-sm" type="button">停，认一下</button>
+                    </div>
+                    <div class="listen-live">
+                        <span class="listen-note" id="listen-note">–</span>
+                        <div class="listen-meter"><span id="listen-level"></span></div>
+                        <div class="listen-trail" id="listen-trail"></div>
+                    </div>
+                    <div class="listen-results" id="listen-results"></div>
+                </div>
+
+                <div class="score-editor" id="score-editor" hidden>
+                    <div class="ed-row">
+                        <input id="ed-name" class="ed-input" type="text" maxlength="16"
+                               placeholder="曲名" aria-label="曲名">
+                        <select id="ed-key" class="ed-input ed-select" aria-label="调"></select>
+                        <input id="ed-bpm" class="ed-input ed-bpm" type="number"
+                               min="30" max="240" step="1" placeholder="BPM" aria-label="速度">
+                    </div>
+                    <div class="ed-tools" role="group" aria-label="连音">
+                        <button type="button" class="ed-tool" data-tool="slur" title="圆滑线：先选中几个音，再点它">⌒ 圆滑线</button>
+                        <button type="button" class="ed-tool" data-tool="tie" title="延音线：光标放在音的后面，再点它，然后写下一个同样的音">‿ 延音线</button>
+                        <button type="button" class="ed-tool" data-tool="triplet" title="三连音：先选中三个音，再点它">³ 三连音</button>
+                        <span class="ed-tools-hint">选中音符再点，符号会包在两边</span>
+                    </div>
+                    <textarea id="ed-score" class="ed-score" rows="5" spellcheck="false"
+                              placeholder="(5 3/) 3/ ~ 3 0/. 2// | {1 2 3} 5 - -" aria-label="谱面"></textarea>
+                    <p class="ed-legend">
+                        <code>1-7</code> 音级 · <code>0</code> 休止 · <code>^ _</code> 高低八度 ·
+                        <code>#  b</code> 升降半音 · <code>-</code> 延长一拍 ·
+                        <code>/</code> 时值减半 · <code>.</code> 附点 · <code>|</code> 小节线 ·
+                        <code>( )</code> 圆滑线 · <code>~</code> 延音线 · <code>{ }</code> 三连音
+                    </p>
+                    <p class="ed-status" id="ed-status" aria-live="polite"></p>
+                    <div class="ed-actions">
+                        <button id="btn-ed-save" class="kbtn kbtn-accent kbtn-sm">保存到曲库</button>
+                        <button id="btn-ed-revert" class="kbtn kbtn-mod kbtn-sm">还原</button>
+                        <button id="btn-ed-delete" class="kbtn kbtn-mod kbtn-sm" hidden>删除</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="song-list" id="song-list" role="group" aria-label="曲库"></div>
+        </section>
+
+    </main>
+
+    <!-- 过关时，句子里每个词的首字母从 3D 键盘上飞起来的那一层 -->
+    <div id="fly-layer" class="fly-layer" aria-hidden="true"></div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <div class="drop-hint" id="drop-hint" hidden><span>松手导入乐谱</span></div>
+
+    <div class="webgl-fallback" id="webgl-fallback" hidden>
+        <p>这个页面需要支持 WebGL 的浏览器来画那块 3D 键盘。<br>换一个新一点的 Chrome、Safari 或 Edge 试试。</p>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
