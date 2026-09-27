@@ -4,13 +4,36 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.disable('x-powered-by');
 
 // 静态文件每次都让浏览器回来确认一下有没有更新（没变就是一个 304，很便宜）。
 // 不然改了 js 之后浏览器可能还在用旧的模块，页面会报一些莫名其妙的错
 app.use(express.static(path.join(__dirname, 'public'), {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));
-app.use(express.json({ limit: '1mb' }));
+// 请求体只有几个字母：给 2KB 足够，大了直接拒
+app.use(express.json({ limit: '2kb' }));
+
+// ---------- 输入校验 + 限流 ----------
+// 只收 1–12 个英文字母：请求里别的东西一概进不了提示词
+const LETTERS_RE = /^[A-Za-z]{1,12}$/;
+// 同一个地址每分钟最多 30 次。放到公网上时，别让人拿你的 DeepSeek key 刷请求；
+// 超了不报错，直接用本地词库拼一句（玩的人照样有句子看）
+const RATE = { windowMs: 60 * 1000, max: 30 };
+const hits = new Map();
+function rateLimited(ip) {
+    const now = Date.now();
+    let h = hits.get(ip);
+    if (!h || now > h.reset) {
+        h = { count: 0, reset: now + RATE.windowMs };
+        hits.set(ip, h);
+    }
+    h.count += 1;
+    if (hits.size > 5000) for (const [k, v] of hits) if (now > v.reset) hits.delete(k);
+    return h.count > RATE.max;
+}
+// DeepSeek 偶尔会很慢（它要先想一大段）：20 秒还没回来就不等了，用兜底
+const API_TIMEOUT_MS = 20000;
 
 // ---------- 本地词库（兜底） ----------
 const WORD_BANK = {
@@ -103,10 +126,17 @@ function extractCandidates(raw) {
 }
 
 app.post('/api/generate', async (req, res) => {
-    const { letters } = req.body;
+    const { letters } = req.body || {};
 
-    if (!letters || typeof letters !== 'string') {
-        return res.status(400).json({ error: '缺少 letters 参数' });
+    if (typeof letters !== 'string' || !LETTERS_RE.test(letters)) {
+        return res.status(400).json({ error: 'letters 只能是 1–12 个英文字母' });
+    }
+    if (rateLimited(req.ip)) {
+        console.log(`⏳ 请求太频繁（${req.ip}），用兜底词库`);
+        return res.json({ sentence: generateFallback(letters) + '!', fallback: true });
+    }
+    if (!process.env.DEEPSEEK_API_KEY) {
+        return res.json({ sentence: generateFallback(letters) + '!', fallback: true });
     }
 
     console.log(`📤 收到请求: ${letters}`);
@@ -120,6 +150,7 @@ app.post('/api/generate', async (req, res) => {
     try {
         const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
             method: 'POST',
+            signal: AbortSignal.timeout(API_TIMEOUT_MS),
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,

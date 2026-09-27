@@ -30,6 +30,10 @@
 @property --alpha-ink { syntax: "<color>"; inherits: true; initial-value: #dcfcf6; }
 @property --mod { syntax: "<color>"; inherits: true; initial-value: #1c5b62; }
 @property --mod-ink { syntax: "<color>"; inherits: true; initial-value: #bfe9e3; }
+/* 渐变的三个取样点（配色里的 grad：起点 / 中段 / 终点），背景、标题、走线的颜色都从这里取 */
+@property --grad-a { syntax: "<color>"; inherits: true; initial-value: #4fe6c4; }
+@property --grad-b { syntax: "<color>"; inherits: true; initial-value: #9ceb8f; }
+@property --grad-c { syntax: "<color>"; inherits: true; initial-value: #f2b93b; }
 
 :root {
     --bg: #041211;
@@ -42,7 +46,11 @@
     --alpha-ink: #dcfcf6;
     --mod: #1c5b62;
     --mod-ink: #bfe9e3;
+    --grad-a: #4fe6c4;
+    --grad-b: #9ceb8f;
+    --grad-c: #f2b93b;
     --error: #ff5d6c;
+    --grad-line: linear-gradient(100deg, var(--grad-a), var(--grad-b), var(--grad-c));
 
     --ink-2: color-mix(in oklab, var(--ink) 68%, transparent);
     --ink-3: color-mix(in oklab, var(--ink) 44%, transparent);
@@ -63,7 +71,7 @@
     transition:
         --bg 900ms ease, --ink 900ms ease, --glow 900ms ease, --accent 900ms ease,
         --accent-ink 900ms ease, --case 900ms ease, --alpha 900ms ease, --alpha-ink 900ms ease,
-        --mod 900ms ease, --mod-ink 900ms ease;
+        --mod 900ms ease, --mod-ink 900ms ease, --grad-a 1200ms ease, --grad-b 1200ms ease, --grad-c 1200ms ease;
 }
 
 * { box-sizing: border-box; }
@@ -119,7 +127,7 @@ button { font: inherit; color: inherit; }
     top: 30vh;
     width: 46vmax;
     height: 46vmax;
-    background: radial-gradient(circle, color-mix(in oklab, var(--glow) 12%, transparent) 0%, transparent 62%);
+    background: radial-gradient(circle, color-mix(in oklab, var(--grad-b) 14%, transparent) 0%, transparent 62%);
     opacity: 0.8;
     animation: drift-c 38s ease-in-out infinite alternate;
 }
@@ -144,7 +152,7 @@ button { font: inherit; color: inherit; }
 .bg-light-a {
     left: -22vmax;
     top: -30vmax;
-    background: radial-gradient(circle, var(--glow-a) 0%, transparent 62%);
+    background: radial-gradient(circle, color-mix(in oklab, var(--grad-a) 34%, transparent) 0%, transparent 62%);
     opacity: 0.7;
     animation: drift-a 26s ease-in-out infinite alternate;
 }
@@ -153,7 +161,7 @@ button { font: inherit; color: inherit; }
     --pull: 5vmax;
     right: -26vmax;
     bottom: -34vmax;
-    background: radial-gradient(circle, color-mix(in oklab, var(--accent) 22%, transparent) 0%, transparent 60%);
+    background: radial-gradient(circle, color-mix(in oklab, var(--grad-c) 24%, transparent) 0%, transparent 60%);
     opacity: 0.6;
     animation: drift-b 32s ease-in-out infinite alternate;
 }
@@ -166,6 +174,71 @@ button { font: inherit; color: inherit; }
 @keyframes drift-b {
     0% { transform: translate(0, 0) scale(1.05); }
     100% { transform: translate(-12vmax, -8vmax) scale(0.94); }
+}
+
+/* 极光：渐变的三种颜色排成一圈，从屏幕下方透上来。
+   画的时候只有半个屏幕大，再放大两倍——放大本身就是一层免费的柔焦，不用 blur；
+   开了"流光"才慢慢转（只动 transform，交给合成器，不重画） */
+.bg-aurora {
+    position: absolute;
+    left: 50%;
+    top: 62%;
+    width: 64vmax;
+    height: 64vmax;
+    margin: -32vmax 0 0 -32vmax;
+    border-radius: 50%;
+    background: conic-gradient(from 20deg, var(--grad-a), var(--grad-b), var(--grad-c), var(--grad-b), var(--grad-a));
+    -webkit-mask-image: radial-gradient(closest-side, #000 20%, rgba(0, 0, 0, 0.45) 55%, transparent 100%);
+    mask-image: radial-gradient(closest-side, #000 20%, rgba(0, 0, 0, 0.45) 55%, transparent 100%);
+    opacity: 0.16;
+    transform: scale(2.1);
+    will-change: transform;
+}
+
+body.flow .bg-aurora { animation: aurora-spin 70s linear infinite; }
+
+@keyframes aurora-spin {
+    from { transform: scale(2.1) rotate(0deg); }
+    to { transform: scale(2.1) rotate(360deg); }
+}
+
+/* 过关的梦境：页面沉进夜里（一层深色的夜幕），星云、星星、光斑从背后浮出来；极光转起来 */
+.bg-night {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(ellipse 70% 55% at 50% 36%, color-mix(in oklab, var(--grad-b) 12%, transparent), transparent 72%),
+        linear-gradient(180deg, rgba(5, 4, 18, 0.6), rgba(2, 2, 10, 0.8));
+    opacity: 0;
+    transition: opacity 1.4s ease;
+}
+
+.dream-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    transition: opacity 1.5s ease;
+}
+
+.dream-canvas.on { opacity: 1; }
+body.dreaming .bg-night { opacity: 1; }
+body.dreaming .bg-aurora { opacity: 0.3; animation: aurora-spin 44s linear infinite; }
+body.dreaming .scene-canvas { opacity: 0.25; }
+.bg-aurora { transition: opacity 1.4s ease; }
+
+/* 回放那几秒：关卡页上的字和按钮退到一边，只看键盘。
+   用 filter 而不是 opacity：入场动画（fill: both）一直占着 opacity，写了也不生效 */
+#screen-game .hud, #game-controls, #feedback-msg { transition: filter 0.8s ease; }
+body.dreaming #screen-game .hud, body.dreaming #game-controls, body.dreaming #feedback-msg { filter: opacity(0.16); }
+
+/* 梦里的过关页：键盘画布四边羽化，镜头斜着看、键盘超出框的地方柔柔地淡进夜色里，不会被一刀切 */
+body.dreaming .stage-reward .kb-canvas {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%), linear-gradient(to right, transparent 0, #000 7%, #000 93%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%), linear-gradient(to right, transparent 0, #000 7%, #000 93%, transparent 100%);
+    mask-composite: intersect;
 }
 
 /* 一层很淡的胶片颗粒，深色大面积纯色会显得"塑料" */
@@ -243,7 +316,7 @@ body.on-home:not(.past-hero) .brand {
     top: 11px;
     height: 3px;
     border-radius: 3px;
-    background: var(--glow);
+    background: var(--grad-line);
     box-shadow: 0 0 8px var(--glow);
 }
 
@@ -316,7 +389,7 @@ body.on-home:not(.past-hero) .brand {
 #vol-slider::-webkit-slider-runnable-track {
     height: 3px;
     border-radius: 3px;
-    background: linear-gradient(90deg, var(--glow) 0 var(--vol-fill), var(--line-2) var(--vol-fill) 100%);
+    background: linear-gradient(90deg, var(--grad-a) 0, var(--grad-c) var(--vol-fill), var(--line-2) var(--vol-fill) 100%);
 }
 
 #vol-slider::-webkit-slider-thumb {
@@ -402,10 +475,10 @@ body.on-home:not(.past-hero) .brand {
     color: var(--ink-3);
 }
 
-/* 选关：十二颗小键帽，每颗带着自己那一关的颜色 */
+/* 选关：十四颗小键帽，每颗带着自己那一关的颜色 */
 .level-chips {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr);
     gap: 7px;
 }
 
@@ -426,6 +499,18 @@ body.on-home:not(.past-hero) .brand {
 
 .level-chip:hover { filter: brightness(1.08); }
 .level-chip:active { transform: translateY(3px); box-shadow: 0 0 0 color-mix(in oklab, var(--chip) 50%, black); }
+
+.level-chip::after {
+    content: "";
+    position: absolute;
+    left: 7px;
+    right: 7px;
+    bottom: 3px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--chip-grad, transparent);
+    opacity: 0.9;
+}
 
 .level-chip-num { font-family: var(--font-mono); font-weight: 700; font-size: 14px; line-height: 1.1; }
 .level-chip-keys { font-family: var(--font-mono); font-size: 9px; opacity: 0.7; }
@@ -545,6 +630,21 @@ body.on-home:not(.past-hero) .brand {
 .kbtn-sm { min-height: 36px; padding: 7px 14px 8px; font-size: 13.5px; border-radius: 10px; }
 .kbtn-lg { min-height: 52px; padding: 13px 34px 14px; font-size: 16px; border-radius: 14px; }
 
+/* 大按钮外面一圈渐变描边（用遮罩只留下边框那一圈） */
+.kbtn-lg::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 16px;
+    padding: 2px;
+    background: var(--grad-line);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    opacity: 0.9;
+    pointer-events: none;
+}
+
 .kbtn.on {
     --cap: var(--glow);
     --cap-ink: var(--bg);
@@ -643,7 +743,11 @@ body.on-home:not(.past-hero) .brand {
     line-height: 0.9;
     letter-spacing: -0.035em;
     color: var(--ink);
-    text-shadow: 0 0 60px var(--glow-b);
+    background: linear-gradient(100deg, var(--ink) 18%, var(--grad-a) 42%, var(--grad-b) 64%, var(--grad-c) 88%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 40px var(--glow-b));
 }
 
 .hero-line {
@@ -834,7 +938,7 @@ body.on-home:not(.past-hero) .brand {
     top: 0;
     height: 0;
     border-radius: 3px;
-    background: var(--glow);
+    background: linear-gradient(180deg, var(--grad-a), var(--grad-b), var(--grad-c));
     box-shadow: 0 0 14px var(--glow);
 }
 
@@ -875,6 +979,10 @@ body.on-home:not(.past-hero) .brand {
     font-size: 30px;
     line-height: 1;
     letter-spacing: -0.02em;
+    background: var(--grad-line);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
 .hud-total { font-family: var(--font-mono); color: var(--ink-3); font-size: 14px; }
@@ -915,6 +1023,56 @@ body.on-home:not(.past-hero) .brand {
     color: var(--ink-2);
 }
 
+/* 途经点（第 14 关）：W → O → R → L → D 一排小键帽，经过一个亮一个，下一站在跳 */
+.hud-route {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+}
+
+.hud-route[hidden] { display: none; }
+
+.hud-route kbd {
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--ink) 8%, transparent);
+    border: 1px solid var(--line-2);
+    color: var(--ink-3);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 13px;
+    transition: background 300ms ease, color 300ms ease, box-shadow 300ms ease, transform 300ms var(--spring);
+}
+
+.hud-route kbd.next {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: transparent;
+    box-shadow: 0 3px 0 color-mix(in oklab, var(--accent) 50%, black), 0 0 16px color-mix(in oklab, var(--accent) 45%, transparent);
+    animation: route-next 1.3s ease-in-out infinite;
+}
+
+.hud-route kbd.done {
+    color: var(--bg);
+    background: linear-gradient(135deg, var(--grad-a), var(--grad-c));
+    border-color: transparent;
+    transform: translateY(2px);
+}
+
+.hr-arrow {
+    width: 10px;
+    height: 1px;
+    background: var(--line-2);
+}
+
+@keyframes route-next {
+    50% { transform: translateY(-2px); }
+}
+
 .hud-left b { color: var(--glow); font-family: var(--font-mono); }
 
 .stage-game { height: clamp(290px, min(52vw, 100svh - 300px), 580px); }
@@ -949,6 +1107,13 @@ body.on-home:not(.past-hero) .brand {
     font-weight: 800;
     font-size: 28px;
     line-height: 1.1;
+}
+
+.eyebrow > span:first-child {
+    background: var(--grad-line);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
 .eyebrow-total { font-family: var(--font-mono); font-weight: 500; font-size: 14px; color: var(--ink-3); }
@@ -1187,7 +1352,15 @@ body.on-home:not(.past-hero) .brand {
 
 .music-title { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
 
-.music-inst { font-size: 22px; font-weight: 780; letter-spacing: 0.04em; }
+.music-inst {
+    font-size: 22px;
+    font-weight: 780;
+    letter-spacing: 0.04em;
+    background: linear-gradient(100deg, var(--ink) 30%, var(--grad-a), var(--grad-c));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
 
 .music-inst-en {
     font-family: var(--font-mono);
@@ -1750,6 +1923,32 @@ body.on-home:not(.past-hero) .brand {
 }
 
 .sp-toggle.on { color: var(--ink); border-color: color-mix(in oklab, var(--glow) 50%, transparent); }
+
+/* 声音自检：一颗按钮 + 一行结果 + 去完整检测页的链接 */
+.sp-check {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+
+.sp-check-btn {
+    padding: 7px 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 10px;
+    background: color-mix(in oklab, var(--glow) 10%, transparent);
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.sp-check-btn:hover { background: color-mix(in oklab, var(--glow) 18%, transparent); }
+.sp-check-out { flex: 1; min-width: 120px; font-size: 12px; color: var(--ink-2); }
+.sp-check-out.bad { color: var(--error); }
+.sp-check-link { font-size: 12px; color: var(--glow); text-decoration: none; }
 .sp-toggle.on .sp-toggle-dot { background: var(--glow); }
 .sp-toggle.on .sp-toggle-dot::after { transform: translateX(11px); background: var(--bg); }
 
@@ -1833,8 +2032,8 @@ body.cinematic .grade {
     overflow: hidden;
     padding: 28px 30px 24px;
     background:
-        radial-gradient(ellipse 80% 70% at 88% 0%, color-mix(in oklab, var(--glow) 16%, transparent), transparent 70%),
-        radial-gradient(ellipse 60% 60% at 0% 100%, color-mix(in oklab, var(--accent) 12%, transparent), transparent 70%),
+        radial-gradient(ellipse 80% 70% at 88% 0%, color-mix(in oklab, var(--grad-c) 16%, transparent), transparent 70%),
+        radial-gradient(ellipse 60% 60% at 0% 100%, color-mix(in oklab, var(--grad-a) 14%, transparent), transparent 70%),
         var(--glass);
 }
 
@@ -1885,34 +2084,92 @@ body.cinematic .grade {
 
 .pw { display: inline-block; white-space: nowrap; }
 
-/* 首字母：用标题字体、站在发光色里；落地之前先藏着（位置留好，等飞过来的那个字母落进来） */
+/* 首字母：用标题字体，颜色顺着这一关的渐变一个词一个词排过去 */
 .pw-i {
+    position: relative;
     display: inline-block;
     font-family: var(--font-display);
     font-style: normal;
     font-weight: 700;
     font-size: 0.92em;
     margin-right: 0.02em;
-    color: var(--glow);
-    text-shadow: 0 0 18px var(--glow-a);
-    visibility: hidden;
+    color: var(--pw-c, var(--glow));
+    text-shadow: 0 0 18px color-mix(in oklab, var(--pw-c, var(--glow)) 55%, transparent);
 }
 
-.pw.hit .pw-i { color: var(--accent); text-shadow: 0 0 18px color-mix(in oklab, var(--accent) 50%, transparent); }
+/* 还没放飞回来：字母的位置空着，只留一道一呼一吸的光槽 */
+.pw:not(.landed) .pw-i { color: transparent; text-shadow: none; }
 
-/* 词的其余部分：首字母落定后从左往右展开 */
+.pw:not(.landed) .pw-i::after {
+    content: "";
+    position: absolute;
+    left: 0.06em;
+    right: 0.06em;
+    bottom: 0.16em;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--pw-c, var(--glow));
+    box-shadow: 0 0 8px var(--pw-c, var(--glow));
+    animation: slot 1.6s ease-in-out infinite;
+}
+
+@keyframes slot {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 0.2; }
+}
+
+/* 词的其余部分：先是一层淡淡的影子（看得出句子的样子），首字母落定后从左往右亮起来 */
 .pw-r {
     display: inline-block;
-    clip-path: inset(0 100% 0 0);
-    opacity: 0.2;
-    transition: clip-path 520ms var(--ease), opacity 520ms ease;
+    -webkit-mask-image: linear-gradient(90deg, #000 45%, rgba(0, 0, 0, 0.24) 55%);
+    mask-image: linear-gradient(90deg, #000 45%, rgba(0, 0, 0, 0.24) 55%);
+    -webkit-mask-size: 240% 100%;
+    mask-size: 240% 100%;
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
+    transition: -webkit-mask-position 640ms var(--ease), mask-position 640ms var(--ease);
 }
 
-.pw.landed .pw-i { visibility: visible; animation: land 420ms var(--spring); }
-.pw.landed .pw-r { clip-path: inset(0 -4px 0 0); opacity: 1; }
+.pw.landed .pw-i { animation: land 460ms var(--spring); }
+.pw.landed .pw-r { -webkit-mask-position: 0 0; mask-position: 0 0; }
 
 @keyframes land {
-    0% { transform: scale(1.35); }
+    0% {
+        transform: scale(1.6);
+        filter: brightness(2.2);
+        text-shadow: 0 0 6px #fff, 0 0 24px var(--pw-c, var(--glow)), 0 0 46px var(--pw-c, var(--glow));
+    }
+    100% { transform: none; filter: none; }
+}
+
+/* 成句：一道光从左往右扫过整句，首字母挨个跳一下 */
+.poster-sentence { position: relative; }
+
+.poster.complete .poster-sentence::after {
+    content: "";
+    position: absolute;
+    inset: -8px -12px;
+    /* 彩虹色的一道光：渐变的三种颜色排在一起扫过去 */
+    background: linear-gradient(100deg, transparent 28%,
+        color-mix(in oklab, var(--grad-a) 34%, transparent) 40%,
+        color-mix(in oklab, var(--grad-b) 46%, transparent) 50%,
+        color-mix(in oklab, var(--grad-c) 34%, transparent) 60%, transparent 72%);
+    background-size: 260% 100%;
+    mix-blend-mode: screen;
+    pointer-events: none;
+    animation: shimmer 1.9s var(--ease) both;
+}
+
+@keyframes shimmer {
+    from { background-position: 110% 0; }
+    to { background-position: -10% 0; }
+}
+
+.poster.complete .pw-i { animation: hop 620ms var(--spring) both; animation-delay: calc(var(--i, 0) * 55ms + 200ms); }
+
+@keyframes hop {
+    0% { transform: none; }
+    40% { transform: translateY(-0.28em); }
     100% { transform: none; }
 }
 
@@ -1956,12 +2213,171 @@ body.cinematic .grade {
     top: 0;
     font-family: var(--font-display);
     font-weight: 700;
-    color: var(--glow);
-    text-shadow: 0 0 14px var(--glow), 0 0 30px var(--glow-a);
-    will-change: transform, opacity;
+    color: var(--pw-c, var(--glow));
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.9), 0 0 16px var(--pw-c, var(--glow)), 0 0 40px color-mix(in oklab, var(--pw-c, var(--glow)) 55%, transparent);
+    will-change: transform;
 }
 
-.fly-letter.hit { color: var(--accent); text-shadow: 0 0 14px var(--accent), 0 0 30px color-mix(in oklab, var(--accent) 50%, transparent); }
+/* ---------------- 拾字：挂在键帽上方的灯笼 ---------------- */
+.lantern-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 54;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+/* 外层只是个锚点（键帽顶面中心），每一帧由脚本挪位置；里面那颗才是灯笼 */
+.lantern {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    pointer-events: none;
+}
+
+.lantern::after {
+    content: "";
+    position: absolute;
+    left: -0.5px;
+    bottom: 2px;
+    width: 1px;
+    height: 20px;
+    background: linear-gradient(to top, transparent, var(--c));
+    box-shadow: 0 0 6px var(--c);
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.lt-in {
+    position: absolute;
+    left: 0;
+    bottom: 22px;
+    translate: -50% 0;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    /* 一颗会发光的光球：顶上一点高光，里面是这个词自己的颜色 */
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.34), transparent 40%),
+        radial-gradient(circle, color-mix(in oklab, var(--c) 58%, transparent) 0%, color-mix(in oklab, var(--c) 16%, rgba(4, 3, 16, 0.4)) 72%);
+    border: 1px solid color-mix(in oklab, var(--c) 72%, #fff 12%);
+    box-shadow:
+        0 0 22px color-mix(in oklab, var(--c) 70%, transparent),
+        0 0 60px color-mix(in oklab, var(--c) 32%, transparent),
+        inset 0 0 12px color-mix(in oklab, var(--c) 45%, transparent);
+    color: #fff;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 21px;
+    line-height: 1;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px var(--c);
+    cursor: pointer;
+    pointer-events: auto;
+    animation: lantern-in 540ms var(--spring) both, bob 2.8s ease-in-out 540ms infinite;
+}
+
+/* 外面一圈慢慢转的光环 */
+.lt-in::before {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent, var(--c) 18%, transparent 38%, color-mix(in oklab, var(--c) 45%, #fff) 62%, transparent 80%);
+    -webkit-mask: radial-gradient(closest-side, transparent 80%, #000 83%, #000 94%, transparent 97%);
+    mask: radial-gradient(closest-side, transparent 80%, #000 83%, #000 94%, transparent 97%);
+    animation: halo-spin 3.4s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes halo-spin { to { transform: rotate(1turn); } }
+
+.lt-in:hover { filter: brightness(1.15); }
+
+.lt-n {
+    position: absolute;
+    top: -8px;
+    right: -9px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: var(--c);
+    color: #0b0b10;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-style: normal;
+    text-shadow: none;
+}
+
+.lt-n:empty { display: none; }
+
+.lantern.nudge .lt-in { animation: nudge 0.95s ease-in-out infinite; }
+.lantern.gone .lt-in { animation: lantern-out 360ms ease both; }
+
+@keyframes lantern-in {
+    from { opacity: 0; transform: translateY(20px) scale(0.55); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes bob {
+    0%, 100% { transform: none; }
+    50% { transform: translateY(-6px); }
+}
+
+@keyframes nudge {
+    0%, 100% { transform: none; }
+    40% { transform: translateY(-12px) scale(1.14); }
+}
+
+@keyframes lantern-out {
+    to { opacity: 0; transform: translateY(-18px) scale(0.7); }
+}
+
+.letter-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin: -12px auto 22px;
+    font-size: 14px;
+    color: var(--ink-2);
+    transition: color 300ms ease;
+}
+
+.letter-hint[hidden] { display: none; }
+.letter-hint.nudge .lh-text { color: var(--ink); text-shadow: 0 0 14px var(--glow-a); }
+
+.lh-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 13px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--glow) 10%, transparent);
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.lh-all:hover { background: color-mix(in oklab, var(--glow) 18%, transparent); }
+.lh-all kbd { font-family: var(--font-mono); font-size: 11px; opacity: 0.75; }
+
+/* 句子齐了：下一关按钮一呼一吸 */
+#btn-next.ready { animation: next-ready 1.8s ease-in-out infinite; }
+
+@keyframes next-ready {
+    0%, 100% { filter: none; }
+    50% { filter: brightness(1.14) drop-shadow(0 0 16px var(--glow-a)); }
+}
 
 /* 终局的句子列表也一样把首字母拎出来 */
 .final-sentence-text {
@@ -1979,7 +2395,7 @@ body.cinematic .grade {
 }
 
 /* ============================================================
-   导入 · 听歌识曲 · 编辑器的连音工具
+   编辑器的连音工具
    ============================================================ */
 .ed-tools {
     display: flex;
@@ -2004,113 +2420,6 @@ body.cinematic .grade {
 .ed-tool:hover { background: color-mix(in oklab, var(--glow) 18%, transparent); }
 .ed-tool:active { transform: translateY(1px); }
 .ed-tools-hint { font-size: 11.5px; color: var(--ink-3); }
-
-.listen-panel {
-    margin-top: 14px;
-    padding: 14px 16px;
-    border-radius: 16px;
-    background: color-mix(in oklab, var(--bg) 55%, transparent);
-    border: 1px solid var(--line-2);
-}
-
-.listen-panel[hidden] { display: none; }
-.listen-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-
-.listen-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--error);
-    box-shadow: 0 0 0 0 rgba(255, 93, 108, 0.6);
-    animation: rec 1.4s ease-out infinite;
-}
-
-@keyframes rec {
-    0% { box-shadow: 0 0 0 0 rgba(255, 93, 108, 0.55); }
-    100% { box-shadow: 0 0 0 12px rgba(255, 93, 108, 0); }
-}
-
-.listen-status { flex: 1; min-width: 160px; font-size: 13.5px; font-weight: 620; }
-
-.listen-live { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
-
-.listen-note {
-    min-width: 54px;
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 22px;
-    color: var(--glow);
-    text-shadow: 0 0 14px var(--glow-a);
-}
-
-.listen-meter {
-    flex: 0 0 90px;
-    height: 6px;
-    border-radius: 6px;
-    background: var(--line);
-    overflow: hidden;
-}
-
-.listen-meter span {
-    display: block;
-    height: 100%;
-    width: 0;
-    border-radius: 6px;
-    background: var(--glow);
-    transition: width 80ms linear;
-}
-
-.listen-trail {
-    flex: 1;
-    display: flex;
-    gap: 4px;
-    overflow: hidden;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--ink-2);
-    mask-image: linear-gradient(90deg, transparent, #000 18%);
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%);
-    justify-content: flex-end;
-}
-
-.listen-trail span { animation: rise 300ms var(--ease) both; }
-
-.listen-results { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-.listen-results:empty { display: none; }
-
-.listen-row {
-    display: grid;
-    grid-template-columns: minmax(80px, 1fr) 1.2fr 40px auto;
-    align-items: center;
-    gap: 10px;
-}
-
-.lr-name { font-weight: 700; font-size: 14px; }
-.lr-bar { height: 6px; border-radius: 6px; background: var(--line); overflow: hidden; }
-.lr-bar span { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--glow), var(--accent)); }
-.lr-pct { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); text-align: right; }
-.listen-save { justify-self: start; margin-top: 4px; }
-#btn-listen.on { --cap: var(--error); --cap-ink: #fff; }
-
-/* 拖文件进来时整页提示 */
-.drop-hint {
-    position: fixed;
-    inset: 14px;
-    z-index: 90;
-    display: grid;
-    place-items: center;
-    border: 2px dashed var(--glow);
-    border-radius: 28px;
-    background: color-mix(in oklab, var(--bg) 70%, transparent);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    pointer-events: none;
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--glow);
-}
-
-.drop-hint[hidden] { display: none; }
 
 /* 提示条 */
 .toast {
@@ -2166,12 +2475,12 @@ body.cinematic .grade {
     .sp-chips { grid-template-columns: repeat(3, 1fr); }
     .poster-quote { font-size: 110px; top: -34px; }
     .reward-card.is-poster { padding: 22px 20px 20px; }
-    .listen-row { grid-template-columns: 1fr 50px auto; }
-    .listen-row .lr-bar { display: none; }
     /* 手机竖屏：键盘按宽度撑满，舞台高度贴着它，不留一大块空白 */
     .stage-game { height: max(230px, 66vw); }
     .stage-music { height: max(210px, 58vw); }
     .music-title { order: -1; flex-basis: 100%; }
+    /* 手机上页面左右只留 14px：乐器那一排的"出血"也只出 14px，不然整页会横着多出一截 */
+    .inst-row { margin: 4px -14px 18px; padding: 6px 14px 10px; }
     .song-list { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -2186,7 +2495,185 @@ body.cinematic .grade {
     .reveal { opacity: 1; transform: none; transition: none; }
     .bg-light { transition: none; translate: none; }
     .pw-r { transition: none; }
-    .pw.landed .pw-i { animation: none; }
-    .listen-dot, #btn-skip.armed { animation: none; }
+    .pw.landed .pw-i, .poster.complete .pw-i, .lt-in, .lt-in::before, #btn-next.ready { animation: none; }
+    .poster.complete .poster-sentence::after { display: none; }
+    #btn-skip.armed { animation: none; }
     #screen-bloom.fire { animation-duration: 300ms; }
+}
+
+/* ============================================================
+   深海模式
+   画布铺满整个窗口，别的界面全部退场，只留顶上的标题和底下一条控制栏；上下两道电影遮幅
+   ============================================================ */
+.abyss-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 38px;
+    padding: 0 14px 0 10px;
+    border: 1px solid color-mix(in oklab, #2ee6ff 45%, transparent);
+    border-radius: 12px;
+    background: linear-gradient(160deg, #04121c, #062a3a);
+    color: #bff6ff;
+    font-weight: 700;
+    font-size: 13.5px;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    box-shadow: 0 0 18px rgba(46, 230, 255, 0.18), inset 0 1px 0 rgba(160, 240, 255, 0.18);
+    transition: box-shadow 200ms ease, transform 160ms ease;
+}
+
+.abyss-btn:hover { box-shadow: 0 0 26px rgba(46, 230, 255, 0.35), inset 0 1px 0 rgba(160, 240, 255, 0.25); transform: translateY(-1px); }
+
+/* 三道起伏的水纹 */
+.ab-wave {
+    width: 18px;
+    height: 12px;
+    background:
+        radial-gradient(circle at 25% 100%, transparent 3px, #2ee6ff 3.5px, #2ee6ff 4.8px, transparent 5.3px) 0 0 / 9px 6px repeat-x,
+        radial-gradient(circle at 25% 100%, transparent 3px, #2ee6ff 3.5px, #2ee6ff 4.8px, transparent 5.3px) 4px 6px / 9px 6px repeat-x;
+    opacity: 0.9;
+    filter: drop-shadow(0 0 4px #2ee6ff);
+}
+
+.panel-entry-abyss .panel-entry-icon {
+    background: linear-gradient(160deg, #04121c, #0a3a52);
+    color: #7ff4ff;
+    box-shadow: 0 3px 0 #02080d, 0 0 14px rgba(46, 230, 255, 0.3);
+}
+
+body.abyss { background: #010306; }
+body.abyss .bg,
+body.abyss .topbar,
+body.abyss .grade { opacity: 0; pointer-events: none; }
+body.abyss .topbar { visibility: hidden; }
+body.abyss #screen-music > :not(.stage-music):not(.abyss-hud) { display: none !important; }
+
+body.abyss #stage-music {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100svh;
+    margin: 0;
+    z-index: 20;
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+body.abyss .cine-bars span { height: 6svh; }
+
+.abyss-hud {
+    position: fixed;
+    inset: 0;
+    z-index: 47;
+    pointer-events: none;
+    color: #cdf7ff;
+}
+
+.abyss-hud[hidden] { display: none; }
+
+.ah-top {
+    position: absolute;
+    left: max(28px, env(safe-area-inset-left));
+    top: calc(6svh + 22px);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    animation: ah-in 1.6s var(--ease) both 0.3s;
+}
+
+.ah-title {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", serif;
+    font-size: 30px;
+    letter-spacing: 0.4em;
+    color: #e6fbff;
+    text-shadow: 0 0 22px rgba(46, 230, 255, 0.55);
+}
+
+.ah-en {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.5em;
+    color: rgba(127, 244, 255, 0.6);
+}
+
+.ah-hint {
+    position: absolute;
+    left: 50%;
+    bottom: calc(6svh + 84px);
+    translate: -50% 0;
+    margin: 0;
+    font-size: 13px;
+    letter-spacing: 0.24em;
+    color: rgba(160, 240, 255, 0.62);
+    white-space: nowrap;
+    animation: ah-in 1.6s var(--ease) both 0.9s;
+    transition: opacity 1.2s ease;
+}
+
+.ah-hint.gone { opacity: 0; }
+
+.ah-bar {
+    position: absolute;
+    left: 50%;
+    bottom: calc(6svh + 22px);
+    translate: -50% 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px;
+    border-radius: 16px;
+    background: rgba(2, 14, 22, 0.55);
+    border: 1px solid rgba(46, 230, 255, 0.22);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    pointer-events: auto;
+    animation: ah-in 1.4s var(--ease) both 0.6s;
+}
+
+.ah-select {
+    max-width: 160px;
+    padding: 7px 10px;
+    border: 1px solid rgba(46, 230, 255, 0.25);
+    border-radius: 10px;
+    background: rgba(1, 8, 12, 0.8);
+    color: #cdf7ff;
+    font: inherit;
+    font-size: 13px;
+}
+
+.ah-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 13px;
+    border: 1px solid rgba(46, 230, 255, 0.3);
+    border-radius: 10px;
+    background: rgba(8, 40, 56, 0.7);
+    color: #dffaff;
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.ah-btn:hover { background: rgba(12, 60, 82, 0.8); box-shadow: 0 0 16px rgba(46, 230, 255, 0.25); }
+.ah-btn kbd { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.7; }
+.ah-play.on { background: #2ee6ff; color: #01151d; box-shadow: 0 0 22px rgba(46, 230, 255, 0.55); }
+.ah-inst { padding: 0 6px; font-size: 12.5px; letter-spacing: 0.12em; color: rgba(160, 240, 255, 0.7); }
+
+@keyframes ah-in {
+    from { opacity: 0; filter: blur(6px); }
+    to { opacity: 1; filter: none; }
+}
+
+@media (max-width: 760px) {
+    .ah-top { top: calc(6svh + 14px); }
+    .ah-title { font-size: 22px; }
+    .ah-hint { white-space: normal; width: 84vw; text-align: center; text-wrap: balance; letter-spacing: 0.12em; bottom: calc(6svh + 130px); }
+    .ah-bar { flex-wrap: wrap; justify-content: center; width: calc(100vw - 32px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ah-top, .ah-hint, .ah-bar { animation: none; }
 }

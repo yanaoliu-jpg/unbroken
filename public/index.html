@@ -7,6 +7,7 @@
     <title>Unbroken · 键盘一笔画</title>
     <link rel="preload" href="fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="fonts/unbounded.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23041211'/%3E%3Cpath d='M8 9h6v7h6v7h4' fill='none' stroke='%234fe6c4' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="style.css">
     <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
 </head>
@@ -16,7 +17,11 @@
         <div class="bg-light bg-light-a"></div>
         <div class="bg-light bg-light-b"></div>
         <div class="bg-light bg-light-c"></div>
+        <div class="bg-aurora"></div>
         <canvas id="scene-canvas" class="scene-canvas"></canvas>
+        <!-- 过关的梦境：页面沉进夜里，星云、星星、光斑从背后浮出来 -->
+        <div class="bg-night"></div>
+        <canvas id="dream-canvas" class="dream-canvas"></canvas>
         <div class="bg-grain"></div>
     </div>
     <!-- 画风调色、电影感的遮幅：盖在最上面但不挡操作 -->
@@ -49,7 +54,15 @@
                     <span class="panel-entry-icon" aria-hidden="true">♪</span>
                     <span class="panel-entry-text">
                         <span class="panel-entry-title">音乐模式</span>
-                        <span class="panel-entry-sub">十二件乐器，一块键盘</span>
+                        <span class="panel-entry-sub">二十四件乐器，一块键盘</span>
+                    </span>
+                    <span class="panel-entry-arrow" aria-hidden="true">→</span>
+                </button>
+                <button id="btn-abyss-mode" type="button" class="panel-entry panel-entry-abyss">
+                    <span class="panel-entry-icon" aria-hidden="true">≋</span>
+                    <span class="panel-entry-text">
+                        <span class="panel-entry-title">深海模式</span>
+                        <span class="panel-entry-sub">琴键沉进水箱，按下去冒出荧光的泡和光</span>
                     </span>
                     <span class="panel-entry-arrow" aria-hidden="true">→</span>
                 </button>
@@ -71,6 +84,11 @@
                 <div class="sp-row"><span class="sp-k">回声</span><div class="seg" id="sp-echo" role="group" aria-label="回声"></div></div>
                 <div class="sp-row"><span class="sp-k">画风</span><div class="seg" id="sp-tone" role="group" aria-label="画风"></div></div>
                 <div class="sp-toggles" id="sp-toggles" role="group" aria-label="效果开关"></div>
+                <div class="sp-check">
+                    <button id="sp-check" class="sp-check-btn" type="button">🔊 测一下声音</button>
+                    <span class="sp-check-out" id="sp-check-out" aria-live="polite"></span>
+                    <a class="sp-check-link" href="soundcheck.html" target="_blank" rel="noopener">完整检测 →</a>
+                </div>
             </div>
         </div>
     </header>
@@ -125,7 +143,7 @@
                             </div>
                         </li>
                     </ol>
-                    <p class="rules-note reveal">一共 12 关，从 5 个键走到 40 个键。最后两关，数字和符号键也会加进来。</p>
+                    <p class="rules-note reveal">一共 14 关，从 5 个键走到 40 个键。第 11 关起数字和符号键也加进来；最后两关连起点和终点都定死了，最后一关还得按顺序拼出一个词。</p>
                 </div>
 
                 <div class="hpanel hpanel-play" data-chapter="play">
@@ -153,9 +171,10 @@
             <div class="hud">
                 <div class="hud-level">
                     <span class="hud-num" id="hud-num">01</span>
-                    <span class="hud-total">/ <span id="hud-total">12</span></span>
+                    <span class="hud-total">/ <span id="hud-total">14</span></span>
                 </div>
                 <div class="hud-theme" id="hud-theme"><span class="hud-dot"></span><span id="hud-theme-name">晨光</span><span class="hud-theme-en" id="hud-theme-en">Dawn</span></div>
+                <p class="hud-route" id="hud-route" hidden aria-label="按顺序经过"></p>
                 <p class="hud-left" id="level-remaining"></p>
             </div>
             <div class="kb-stage stage-game" id="stage-game"></div>
@@ -172,7 +191,7 @@
         <section id="screen-reward" class="screen" hidden>
             <p class="eyebrow">
                 <span id="reward-level-num">01</span>
-                <span class="eyebrow-total">/ <span id="reward-level-total">12</span></span>
+                <span class="eyebrow-total">/ <span id="reward-level-total">14</span></span>
                 <span class="eyebrow-tag">一笔未断</span>
             </p>
             <div class="kb-stage stage-reward" id="stage-reward"></div>
@@ -180,14 +199,18 @@
             <div id="reward-message" class="reward-card">
                 <div class="word-flash"></div>
             </div>
+            <p class="letter-hint" id="letter-hint" hidden>
+                <span class="lh-text">敲下发光的键，把字母送回句子里</span>
+                <button type="button" class="lh-all" id="btn-release-all"><kbd>␣</kbd>全部放飞</button>
+            </p>
             <button id="btn-next" class="kbtn kbtn-accent kbtn-lg">下一关</button>
         </section>
 
         <!-- ============ 终局 ============ -->
         <section id="screen-final" class="screen" hidden>
             <p class="eyebrow">
-                <span id="final-level-num">12</span>
-                <span class="eyebrow-total">/ <span id="final-level-total">12</span></span>
+                <span id="final-level-num">14</span>
+                <span class="eyebrow-total">/ <span id="final-level-total">14</span></span>
                 <span class="eyebrow-tag">一笔到底</span>
             </p>
             <div class="kb-stage stage-final" id="stage-final">
@@ -219,6 +242,9 @@
                     <span class="kc-val kc-val-oct"><span class="kc-name" id="oct-name">0</span><span class="kc-sub">八度</span></span>
                     <button class="kc-btn" id="oct-up" type="button" aria-label="高八度" title="高八度（↑）">▴</button>
                 </div>
+                <button id="btn-abyss" type="button" class="abyss-btn" title="深海模式：键盘沉进一只发光的水箱">
+                    <span class="ab-wave" aria-hidden="true"></span>深海
+                </button>
             </div>
 
             <div class="kb-stage stage-music" id="stage-music"></div>
@@ -242,23 +268,6 @@
                     <button id="btn-score-play" class="kbtn kbtn-accent kbtn-sm" disabled>▶ 试听</button>
                     <button id="btn-score-follow" class="kbtn kbtn-mod kbtn-sm" disabled>跟弹</button>
                     <button id="btn-score-edit" class="kbtn kbtn-mod kbtn-sm">✎ 编辑</button>
-                    <button id="btn-import" class="kbtn kbtn-mod kbtn-sm" title="支持简谱文本（.txt）、MIDI（.mid）和 MusicXML（.musicxml / .xml），也可以直接把文件拖进来">⤓ 导入乐谱</button>
-                    <button id="btn-listen" class="kbtn kbtn-mod kbtn-sm">🎙 听歌识曲</button>
-                    <input type="file" id="file-import" accept=".txt,.jianpu,.mid,.midi,.musicxml,.xml" hidden>
-                </div>
-
-                <div class="listen-panel" id="listen-panel" hidden aria-live="polite">
-                    <div class="listen-top">
-                        <span class="listen-dot" aria-hidden="true"></span>
-                        <span class="listen-status" id="listen-status">正在听……</span>
-                        <button id="btn-listen-stop" class="kbtn kbtn-accent kbtn-sm" type="button">停，认一下</button>
-                    </div>
-                    <div class="listen-live">
-                        <span class="listen-note" id="listen-note">–</span>
-                        <div class="listen-meter"><span id="listen-level"></span></div>
-                        <div class="listen-trail" id="listen-trail"></div>
-                    </div>
-                    <div class="listen-results" id="listen-results"></div>
                 </div>
 
                 <div class="score-editor" id="score-editor" hidden>
@@ -293,16 +302,30 @@
             </div>
 
             <div class="song-list" id="song-list" role="group" aria-label="曲库"></div>
+
+            <!-- 深海模式：整块键盘沉进水箱，界面只留下这一层 -->
+            <div class="abyss-hud" id="abyss-hud" hidden>
+                <div class="ah-top">
+                    <span class="ah-title">深海</span>
+                    <span class="ah-en">ABYSS</span>
+                </div>
+                <p class="ah-hint" id="abyss-hint">按下琴键，荧光的气泡和光柱会从键里升起来</p>
+                <div class="ah-bar">
+                    <select id="abyss-song" class="ah-select" aria-label="演示曲目"></select>
+                    <button id="btn-abyss-play" class="ah-btn ah-play" type="button">▶ 演示</button>
+                    <span class="ah-inst" id="abyss-inst">钢琴</span>
+                    <button id="btn-abyss-exit" class="ah-btn" type="button"><kbd>esc</kbd>浮上去</button>
+                </div>
+            </div>
         </section>
 
     </main>
 
-    <!-- 过关时，句子里每个词的首字母从 3D 键盘上飞起来的那一层 -->
+    <!-- 过关时，句子里每个词的首字母：先像灯笼一样挂在 3D 键盘的键上（lantern-layer），放飞后飞进句子（fly-layer） -->
+    <div id="lantern-layer" class="lantern-layer"></div>
     <div id="fly-layer" class="fly-layer" aria-hidden="true"></div>
 
     <div id="toast" class="toast" role="status" hidden></div>
-
-    <div class="drop-hint" id="drop-hint" hidden><span>松手导入乐谱</span></div>
 
     <div class="webgl-fallback" id="webgl-fallback" hidden>
         <p>这个页面需要支持 WebGL 的浏览器来画那块 3D 键盘。<br>换一个新一点的 Chrome、Safari 或 Edge 试试。</p>

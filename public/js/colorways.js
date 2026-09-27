@@ -11,6 +11,8 @@
 //   knob              旋钮
 //   legendGlow        字是否透光自发光（深色键帽 + 发光字，像背光键盘）
 //   bg / ink          页面背景与文字（深色界面，从键盘配色里取调子）
+//   grad              渐变：几种颜色从键盘左下铺到右上，走线从起点到终点也顺着它换颜色（背景的光也用它）
+//   gradCaps          字母键帽本身也染上渐变的程度（0–1，不写就是不染）
 
 export const COLORWAYS = {
     // 首页 / 第 11 关：参考图那一套
@@ -31,6 +33,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#041211",
         ink: "#e6f7f3",
+        grad: ["#4fe6c4", "#9ceb8f", "#f2b93b"],
     },
 
     chenguang: {
@@ -50,6 +53,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#1a0d14",
         ink: "#fbecef",
+        grad: ["#ff8fb1", "#ffb08a", "#ffd9a0"],
     },
 
     bohe: {
@@ -69,6 +73,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#05130f",
         ink: "#e8faf3",
+        grad: ["#3df2c0", "#4fdcea", "#4ab6e6"],
     },
 
     haiwu: {
@@ -88,6 +93,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#080d15",
         ink: "#e6edf6",
+        grad: ["#6aa4e8", "#8dc4ff", "#bfe8f0"],
     },
 
     miju: {
@@ -107,6 +113,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#140a03",
         ink: "#fff1de",
+        grad: ["#ff8a3d", "#ffb13f", "#ffe07a"],
     },
 
     xunyicao: {
@@ -126,6 +133,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#0d0916",
         ink: "#f0eafb",
+        grad: ["#b797ff", "#d99bff", "#8fb5ff"],
     },
 
     taiyuan: {
@@ -145,6 +153,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#0a0c06",
         ink: "#eef1df",
+        grad: ["#c7da76", "#8fd07a", "#e3c27a"],
     },
 
     muyun: {
@@ -164,6 +173,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#14080f",
         ink: "#fbe8ee",
+        grad: ["#ff7cb2", "#ff9d8a", "#c58bff"],
     },
 
     shuangye: {
@@ -183,6 +193,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#030812",
         ink: "#e8f3fb",
+        grad: ["#7ce8ff", "#9fb8ff", "#e6f6ff"],
     },
 
     // 第 9 关：星火。深色键帽 + 透光的橙色字，像背光键盘在夜里亮着
@@ -203,6 +214,7 @@ export const COLORWAYS = {
         legendGlow: true,
         bg: "#0c0705",
         ink: "#fbeee6",
+        grad: ["#ff3d1c", "#ff6a1c", "#ffb347"],
     },
 
     jiguang: {
@@ -222,6 +234,7 @@ export const COLORWAYS = {
         legendGlow: true,
         bg: "#05040e",
         ink: "#eeeafd",
+        grad: ["#5cf2ce", "#5ab8ff", "#b86bff"],
     },
 
     // 第 12 关：破晓。夜蓝的外壳和修饰键、暖白的字母键、金色强调——天要亮了
@@ -242,6 +255,7 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#04050e",
         ink: "#f7f1e6",
+        grad: ["#5d6bff", "#ff8fb1", "#ffcf5c"],
     },
 
     // ================= B 组乐器的键帽 =================
@@ -254,6 +268,7 @@ export const COLORWAYS = {
         accent: "#c9763a", accentLegend: "#2b1405",
         highlight: "#f0c38a", glow: "#ffb26b", knob: "#c9a36b",
         legendGlow: false, bg: "#120a06", ink: "#f6ece0",
+        grad: ["#ffb26b", "#f0c38a", "#e07b4a"],
     },
     // 古筝：朱砂漆 + 宣纸 + 金
     zhusha: {
@@ -264,6 +279,7 @@ export const COLORWAYS = {
         accent: "#d9a43c", accentLegend: "#3b2204",
         highlight: "#ffd28a", glow: "#ff6b4a", knob: "#e0b053",
         legendGlow: false, bg: "#140504", ink: "#fbece0",
+        grad: ["#ff6b4a", "#ffb35c", "#ffd28a"],
     },
     // 弦乐：酒红琴身 + 松香金
     jiuhong: {
@@ -274,6 +290,7 @@ export const COLORWAYS = {
         accent: "#c9a15a", accentLegend: "#2e1c05",
         highlight: "#f3b7c4", glow: "#ff7a9c", knob: "#c9a15a",
         legendGlow: false, bg: "#10040a", ink: "#f8e8ec",
+        grad: ["#ff7a9c", "#ff9aa8", "#e7b36a"],
     },
     // 长笛：竹青
     zhuqing: {
@@ -284,6 +301,7 @@ export const COLORWAYS = {
         accent: "#d8c46a", accentLegend: "#2e2a06",
         highlight: "#c8f0a8", glow: "#9dfc8c", knob: "#cbd9a8",
         legendGlow: false, bg: "#06100a", ink: "#eef7ea",
+        grad: ["#9dfc8c", "#c8f0a8", "#d8c46a"],
     },
     // 管风琴：深色木 + 烛光一样发亮的金字 + 彩色玻璃的钴蓝
     jiaotang: {
@@ -294,6 +312,7 @@ export const COLORWAYS = {
         accent: "#3f7fd9", accentLegend: "#eaf2ff",
         highlight: "#ffd479", glow: "#ffcf6a", knob: "#d4b06a",
         legendGlow: true, bg: "#07050a", ink: "#f4ecff",
+        grad: ["#ffcf6a", "#ff9f5a", "#6f8cff"],
     },
     // 人声：象牙白 + 淡紫的光
     shengtang: {
@@ -304,6 +323,7 @@ export const COLORWAYS = {
         accent: "#f0c0e0", accentLegend: "#4a1d3c",
         highlight: "#e8dcff", glow: "#cbb8ff", knob: "#e3dcf5",
         legendGlow: false, bg: "#0d0b16", ink: "#f3effd",
+        grad: ["#cbb8ff", "#f0c0e0", "#bfe3ff"],
     },
     // 钢片琴：夜空蓝 + 银字
     xingchen: {
@@ -314,6 +334,7 @@ export const COLORWAYS = {
         accent: "#c7d3ff", accentLegend: "#1b2447",
         highlight: "#eaf0ff", glow: "#b9ccff", knob: "#cfd6e6",
         legendGlow: true, bg: "#050814", ink: "#eef1ff",
+        grad: ["#b9ccff", "#e6ecff", "#9f9bff"],
     },
     // 钢鼓：加勒比海的蓝绿 + 沙色 + 太阳黄
     jialebi: {
@@ -324,6 +345,7 @@ export const COLORWAYS = {
         accent: "#ffcf3f", accentLegend: "#3d2c00",
         highlight: "#7ff2e8", glow: "#3ff5e0", knob: "#ffd36b",
         legendGlow: false, bg: "#031214", ink: "#eafffb",
+        grad: ["#3ff5e0", "#7ff2e8", "#ffd36b"],
     },
     // 贝斯：炭黑 + 黄铜，像深夜的爵士酒吧
     jueshi: {
@@ -334,6 +356,7 @@ export const COLORWAYS = {
         accent: "#b8863b", accentLegend: "#1d1405",
         highlight: "#ffd28a", glow: "#ffb84d", knob: "#c8a05a",
         legendGlow: true, bg: "#0a0908", ink: "#f5ede0",
+        grad: ["#ffb84d", "#ff8f4d", "#ffd28a"],
     },
     // 铺底：深紫星云 + 洋红与青的光
     xingyun: {
@@ -344,6 +367,7 @@ export const COLORWAYS = {
         accent: "#6a3cff", accentLegend: "#efe8ff",
         highlight: "#ff9ef0", glow: "#d06bff", knob: "#a58bd9",
         legendGlow: true, bg: "#06030d", ink: "#f4eaff",
+        grad: ["#d06bff", "#ff7ae0", "#8fe8ff"],
     },
     // 手风琴：巴黎的红、奶油和深蓝
     bali: {
@@ -354,6 +378,7 @@ export const COLORWAYS = {
         accent: "#f2c14e", accentLegend: "#3a2800",
         highlight: "#ffd6d6", glow: "#ff6a7a", knob: "#d9b56c",
         legendGlow: false, bg: "#070a14", ink: "#f8f1e8",
+        grad: ["#ff6a7a", "#ffd6d6", "#7fa3ff"],
     },
     // 8-bit：老掌机的灰壳 + 橄榄绿屏幕色
     youxiji: {
@@ -364,6 +389,7 @@ export const COLORWAYS = {
         accent: "#9a2257", accentLegend: "#f7dbe9",
         highlight: "#9bbc0f", glow: "#b4e02a", knob: "#5d5c55",
         legendGlow: false, bg: "#0b1a0b", ink: "#e8f5c8",
+        grad: ["#b4e02a", "#9bbc0f", "#e6ff6a"],
     },
 
     // ================= 场景 =================
@@ -376,6 +402,7 @@ export const COLORWAYS = {
         accent: "#e2365f", accentLegend: "#fff0f3",
         highlight: "#ffc4d3", glow: "#ff6f95", knob: "#e8c2a0",
         legendGlow: false, bg: "#16070c", ink: "#ffeef2",
+        grad: ["#ff6f95", "#ffb3c6", "#ffcfa8"],
     },
     // 失恋：雨夜的蓝灰，所有颜色都褪掉一层
     yuye: {
@@ -386,6 +413,7 @@ export const COLORWAYS = {
         accent: "#6d8bb3", accentLegend: "#0c1622",
         highlight: "#b8c9dc", glow: "#8fb4e8", knob: "#9aa4ad",
         legendGlow: false, bg: "#06090d", ink: "#dfe6ee",
+        grad: ["#8fb4e8", "#a9c3de", "#6d8bb3"],
     },
     // 冒险：峡谷的锈红和砂岩
     xiagu: {
@@ -396,6 +424,7 @@ export const COLORWAYS = {
         accent: "#2f6b5a", accentLegend: "#e6fff5",
         highlight: "#ffc27a", glow: "#ff9a3c", knob: "#c79a5a",
         legendGlow: false, bg: "#120804", ink: "#fbeee0",
+        grad: ["#ff9a3c", "#ff6a3c", "#ffc27a"],
     },
     // 梦想：长春花蓝 + 糖果粉 + 冰青的光
     mengjing: {
@@ -406,6 +435,7 @@ export const COLORWAYS = {
         accent: "#ff9ad5", accentLegend: "#4a0f33",
         highlight: "#bff3ff", glow: "#9ee8ff", knob: "#d9dbff",
         legendGlow: false, bg: "#07081a", ink: "#f0f1ff",
+        grad: ["#9ee8ff", "#c9b8ff", "#ff9ad5"],
     },
     // 自然：苔藓、地衣和一片琥珀色的叶子
     senlin: {
@@ -416,6 +446,7 @@ export const COLORWAYS = {
         accent: "#c98f3c", accentLegend: "#2a1a04",
         highlight: "#d6f5a0", glow: "#b6f06a", knob: "#a88a5a",
         legendGlow: false, bg: "#050b05", ink: "#eef5e6",
+        grad: ["#b6f06a", "#6fe08a", "#e0c06a"],
     },
     // 城市：霓虹——黑色键帽里透出青色和洋红的字
     nihong: {
@@ -426,6 +457,7 @@ export const COLORWAYS = {
         accent: "#ff2e88", accentLegend: "#fff0f7",
         highlight: "#6af7ff", glow: "#3ef3ff", knob: "#8a8aa0",
         legendGlow: true, bg: "#050508", ink: "#eef0ff",
+        grad: ["#3ef3ff", "#8a6bff", "#ff4fd8"],
     },
     // 海洋：深海蓝 + 会发光的字（像海里的荧光生物）+ 浪花白
     shenhai: {
@@ -436,6 +468,7 @@ export const COLORWAYS = {
         accent: "#f4f1e6", accentLegend: "#0b3a5a",
         highlight: "#7fe0ff", glow: "#45d1ff", knob: "#9ac8d8",
         legendGlow: true, bg: "#020a12", ink: "#e6f7ff",
+        grad: ["#45d1ff", "#3f8fff", "#7fe0ff"],
     },
     // 日落：暮紫外壳、蜜桃键帽、珊瑚修饰键、一颗橙色的太阳
     wanxia: {
@@ -446,6 +479,46 @@ export const COLORWAYS = {
         accent: "#ffb03a", accentLegend: "#3d1a00",
         highlight: "#ffd89a", glow: "#ff8a4c", knob: "#f0b070",
         legendGlow: false, bg: "#12060f", ink: "#fff0e8",
+        grad: ["#ff8a4c", "#ff5f7a", "#b86bff"],
+    },
+
+    // ================= 第 13、14 关 =================
+    // 第 13 关：流光。珍珠白的字母键被一道从青到紫到粉到金的虹彩整个染过去
+    liuguang: {
+        name: "流光", en: "Prism",
+        case: "#17161f", plate: "#0b0a11",
+        alpha: "#e6e1f2", alphaLegend: "#221c38",
+        mod: "#2a2838", modLegend: "#e9e4ff",
+        accent: "#ff7ad9", accentLegend: "#3a0a2c",
+        highlight: "#ffe38a", glow: "#7ef0ff", knob: "#d8d2ea",
+        legendGlow: false, bg: "#07060c", ink: "#f4f1ff",
+        grad: ["#5ee7ff", "#a78bfa", "#ff7ad9", "#ffd36b"],
+        gradCaps: 0.86,
+    },
+    // 第 14 关：寰宇。深空里透光的字，底光是一片从蓝到紫到洋红的星云
+    huanyu: {
+        name: "寰宇", en: "Cosmos",
+        case: "#0c0b22", plate: "#05040f",
+        alpha: "#181640", alphaLegend: "#d6e6ff",
+        mod: "#221f52", modLegend: "#a9b8ff",
+        accent: "#8a6bff", accentLegend: "#f3efff",
+        highlight: "#9ad9ff", glow: "#8a7dff", knob: "#bdb6e0",
+        legendGlow: true, bg: "#030210", ink: "#eeeaff",
+        grad: ["#3fa9ff", "#8a7dff", "#ff5fd2", "#ffc46b"],
+        gradCaps: 0.28,
+    },
+
+    // ================= 深海模式 =================
+    // 黑色琴键、极细的青色字、荧光蓝的光：只给深海模式用
+    abyss: {
+        name: "深海", en: "Abyss",
+        case: "#04090f", plate: "#020508",
+        alpha: "#0b1218", alphaLegend: "#7ff4ff",
+        mod: "#070d13", modLegend: "#58cfe6",
+        accent: "#0f2a3a", accentLegend: "#9ff6ff",
+        highlight: "#5ff0ff", glow: "#2ee6ff", knob: "#3a5566",
+        legendGlow: true, bg: "#010306", ink: "#d8f6ff",
+        grad: ["#1ef2ff", "#2a8bff", "#5a6cff"],
     },
 
     // 音乐模式里选"钢琴"时穿这一套：黑白键帽，红色 Esc / Enter
@@ -466,13 +539,15 @@ export const COLORWAYS = {
         legendGlow: false,
         bg: "#08080a",
         ink: "#f2f2ef",
+        grad: ["#f4f1ea"],
     },
 };
 
-// 十二关依次穿的套装：从一个清晨走到下一个清晨
+// 十四关依次穿的套装：从一个清晨走到下一个清晨，再走进一道虹彩、走出地球
 export const LEVEL_COLORWAYS = [
     "chenguang", "bohe", "haiwu", "miju", "xunyicao", "taiyuan",
     "muyun", "shuangye", "xinghuo", "jiguang", "qinglan", "poxiao",
+    "liuguang", "huanyu",
 ];
 
 export const HOME_COLORWAY = "qinglan";

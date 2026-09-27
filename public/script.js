@@ -5,13 +5,16 @@
 //   首页    背景 + 乐器：文字从它前面滚过去，规则就在它身上演示
 //   关卡    棋盘：亮着的键就是这一关要走完的键
 //   过关    一张俯视的笔迹图
-//   终局    一座塔：十二关的笔迹一层一层叠上去，首尾相接
-//   音乐    十二件乐器（F1–F12），修饰键就是真的修饰键
+//   终局    一座塔：十四关的笔迹一层一层叠上去，首尾相接
+//   音乐    二十四件乐器（F1–F12 × 两组）；还能整块沉进"深海"水箱里弹
 // 声音在 js/audio.js，配色在 js/colorways.js。
 // ============================================================
 import { KeyboardStage, REGIONS } from "./js/kb3d.js";
 import { AudioEngine, INSTRUMENTS, INSTRUMENT_BANKS } from "./js/audio.js";
 import { COLORWAYS, LEVEL_COLORWAYS, HOME_COLORWAY } from "./js/colorways.js";
+import { Abyss, ABYSS_TANK } from "./js/abyss.js";
+import { Dream } from "./js/dream.js";
+import { DreamSky, sparkleSprite, orbSprite } from "./js/dreamsky.js";
 
 // 用相对路径，自动适配当前访问地址
 const API_ENDPOINT = "/api/generate";
@@ -35,6 +38,7 @@ const store = {
 // ============================================================
 // 棋盘：键盘中间那四排，4 × 10
 // 前十关只用字母；第 11 关把数字那一排也放进来，第 12 关连 ; , . / 一起，整整四十个键。
+// 最后两关是出好的题：第 13 关起点、终点都定死；第 14 关还要按顺序经过几个指定的键。
 // 四排在网格上是对齐的：Q 的正上方是 1、正下方是 A，和以前的三排字母完全一致。
 // ============================================================
 const GRID = ["1234567890", "qwertyuiop", "asdfghjkl;", "zxcvbnm,./"].map((r) => r.split(""));
@@ -70,6 +74,12 @@ const LEVELS = [
     { count: 26, pool: "letters" },
     { count: 32, pool: "alnum" },
     { count: 40, pool: "all" },
+    // 第 13 关：起点 F、终点 T 斜对着，只差一步，却得绕完整块键盘才能回来（M I D 三个键不在这一关里）。
+    // 一共只有三种走法
+    { count: 37, pool: "all", design: { holes: "mid", start: "f", end: "t", solution: "fghnbvcxzaswq123er4567890pol;/.,kjuyt" } },
+    // 第 14 关：从 Q 出发，按顺序经过 W O R L D，最后停在 D 上——全盘四十个键，只有这一种走法。
+    // （第一步直接走 W 是个陷阱）
+    { count: 40, pool: "all", design: { start: "q", end: "d", order: "world", solution: "q12we34567890poiuytrfghjkl;/.,mnbvcxzasd" } },
 ];
 const TOTAL_LEVELS = LEVELS.length;
 
@@ -93,6 +103,9 @@ function shuffled(arr) {
 }
 
 function generateLevelKeys(level) {
+    // 出好的题：键就是那几个，顺序直接用备好的那条解
+    const design = LEVELS[level - 1].design;
+    if (design) return design.solution.split("");
     const pool = poolOf(level);
     const target = Math.min(LEVELS[level - 1].count, pool.size);
     // 要走的键接近整片可用区时（第 10–12 关），随机乱走很容易把角落困死，换成"先走出路少的"
@@ -219,6 +232,8 @@ const LEVEL_SOUND = [
     { patch: "aurora", root: 261.63, scale: [0, 2, 4, 6, 8, 10], span: 11 },     // 极光 · 全音阶
     { patch: "pluck", root: 246.94, scale: [0, 2, 3, 7, 9], span: 13 },          // 青岚
     { patch: "piano", root: 261.63, scale: [0, 2, 4, 5, 7, 9, 11], span: 15 },   // 破晓 · 大调
+    { patch: "guzheng", root: 196.0, scale: [0, 2, 4, 7, 9], span: 14 },         // 流光 · 宫调五声，古筝从下面滑上来
+    { patch: "cosmos", root: 220.0, scale: [0, 2, 4, 6, 7, 9, 11], span: 17 },   // 寰宇 · 利底亚
 ];
 
 const levelColorway = (n) => COLORWAYS[LEVEL_COLORWAYS[n - 1]];
@@ -285,10 +300,12 @@ function generateFixedWords(letterSequence) {
 
 // ---------- AI 造句 ----------
 async function generateAISentence(letterSequence) {
+    // 服务端 20 秒就会放弃并给兜底句；这里多等 5 秒，再不回来就算失败（显示"再试一次"的按钮），不让过关页一直转圈
     const response = await fetch(API_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ letters: letterSequence }),
+        signal: AbortSignal.timeout ? AbortSignal.timeout(25000) : undefined,
     });
     if (!response.ok) {
         const errText = await response.text();
@@ -330,6 +347,10 @@ function applyColorway(cw, opts) {
     CSS_VARS.forEach(([k, v]) => root.setProperty(v, cw[k]));
     if (themeMeta) themeMeta.setAttribute("content", cw.bg);
     stage.setColorway(cw, opts);
+    // 渐变的头、腰、尾三种颜色也写进 CSS：背景的极光、标题的渐变字、走线序号都用它
+    root.setProperty("--grad-a", stage.gradientColor(0));
+    root.setProperty("--grad-b", stage.gradientColor(0.5));
+    root.setProperty("--grad-c", stage.gradientColor(1));
 }
 
 // 键帽上的字：只在内容真的变了时才重画那张小画布
@@ -430,14 +451,14 @@ const SCENES = {
     love: { name: "爱情", en: "Love", colorway: "meigui", amb: "love", particles: "petals", fx: { reverb: "hall", bloom: true, tone: "warm" } },
     heartbreak: { name: "失恋", en: "Heartbreak", colorway: "yuye", amb: "rain", particles: "rain", fx: { reverb: "hall", echo: 0.5, tone: "warm" } },
     adventure: { name: "冒险", en: "Adventure", colorway: "xiagu", amb: "adventure", particles: "embers", fx: { reverb: "cathedral", cinematic: true } },
-    dream: { name: "梦想", en: "Dream", colorway: "mengjing", amb: "dream", particles: "stars", fx: { reverb: "cathedral", bloom: true, tone: "bright" } },
+    dream: { name: "梦想", en: "Dream", colorway: "mengjing", amb: "dream", particles: "stars", fx: { reverb: "cathedral", bloom: true, tone: "bright", flow: true } },
     nature: { name: "自然", en: "Nature", colorway: "senlin", amb: "forest", particles: "fireflies", fx: { reverb: "plate", width: true } },
-    city: { name: "城市", en: "City", colorway: "nihong", amb: "city", particles: "bokeh", fx: { reverb: "room", echo: 1, tone: "bright" } },
+    city: { name: "城市", en: "City", colorway: "nihong", amb: "city", particles: "bokeh", fx: { reverb: "room", echo: 1, tone: "bright", flow: true } },
     ocean: { name: "海洋", en: "Ocean", colorway: "shenhai", amb: "ocean", particles: "bubbles", fx: { reverb: "hall", echo: 0.5, width: true } },
     sunset: { name: "日落", en: "Sunset", colorway: "wanxia", amb: "sunset", particles: "haze", fx: { reverb: "hall", bloom: true, tone: "warm" } },
 };
 
-const FX_DEFAULT = { reverb: "hall", echo: 0, tone: "clear", bloom: false, width: false, cinematic: false, ambience: true };
+const FX_DEFAULT = { reverb: "hall", echo: 0, tone: "clear", bloom: false, width: false, cinematic: false, ambience: true, flow: false };
 
 // custom：自己在面板里改过的项（优先级最高）
 const style = loadStyle();
@@ -493,6 +514,8 @@ function applyStyle({ persist = true } = {}) {
         key: L.key,
     });
     stage.setCinematic(!!fx.cinematic);
+    stage.setGradientMode(fx.flow ? "flow" : "soft");
+    document.body.classList.toggle("flow", !!fx.flow && !reduceMotion);
     document.body.dataset.tone = fx.tone;
     document.body.dataset.scene = style.scene;
     document.body.classList.toggle("cinematic", !!fx.cinematic);
@@ -541,6 +564,7 @@ function resetStyle() {
 
 // 当前这一屏应该穿哪套键帽：选了场景就是场景的，否则每屏各有各的
 function screenColorway() {
+    if (abyssOn) return COLORWAYS.abyss;
     const sc = SCENES[style.scene];
     if (sc && sc.colorway) return COLORWAYS[sc.colorway];
     if (currentScreen === "game" || currentScreen === "reward") return levelColorway(state.level);
@@ -570,6 +594,7 @@ const TOGGLES = [
     ["width", "空间感", "把声音往两边推开，戴耳机最明显"],
     ["cinematic", "电影感", "大空间 + 宽声场 + 遮幅画面，镜头也放慢"],
     ["ambience", "环境声", "场景自带的海浪、雨声、鸟叫……"],
+    ["flow", "流光", "渐变的颜色在键盘底光和背景里慢慢流动（多耗一点电）"],
 ];
 
 function buildStylePanel() {
@@ -623,6 +648,7 @@ function buildStylePanel() {
         tg.appendChild(b);
     });
     $("sp-reset").addEventListener("click", resetStyle);
+    $("sp-check").addEventListener("click", quickSoundCheck);
 }
 
 function syncStylePanel() {
@@ -651,6 +677,41 @@ function syncStylePanel() {
     });
     // 顶栏按钮上一个小点：有自定义风格时亮着
     styleBtn.classList.toggle("has-style", style.mood !== "none" || style.scene !== "none" || Object.keys(style.custom).length > 0);
+}
+
+// ---------- 声音自检：弹一个和弦，从送往扬声器的那一路量电平 ----------
+function quickSoundCheck() {
+    const out = $("sp-check-out");
+    const say = (text, bad = false) => {
+        out.textContent = text;
+        out.classList.toggle("bad", bad);
+    };
+    if (!soundOn) return say("声音开关是关着的：点顶栏的喇叭打开", true);
+    if (volume <= 0.001) return say("音量是 0：把顶栏的滑杆往右拖", true);
+    audio.ensure();
+    audio.unlock();
+    say("听……");
+    const patch = currentPatch();
+    [0, 4, 7, 12].forEach((s, i) => audio.play(patch, 261.63 * Math.pow(2, s / 12), { when: i * 0.05, velocity: 0.8 }));
+    let best = -Infinity;
+    const t0 = performance.now();
+    const poll = () => {
+        const m = audio.meter();
+        if (m) best = Math.max(best, m.rms);
+        if (performance.now() - t0 < 900) {
+            requestAnimationFrame(poll);
+            return;
+        }
+        const st = audio.ctx ? audio.ctx.state : "none";
+        if (st !== "running") say(`浏览器把声音挂起了（${st}）：点一下页面任意位置再试`, true);
+        else if (best < -70) say("音频在跑，但送出去的是静音：检查系统音量和输出设备", true);
+        else {
+            const L = audio.latency();
+            const ms = L ? Math.round(L.total * 1000) : 0;
+            say(`✓ 声音通路正常，最响 ${Math.round(best)} dBFS` + (ms ? ` · 按下到出声约 ${ms} ms${L.total >= LAG_NOTICE ? "（偏慢，蓝牙耳机？）" : ""}` : ""));
+        }
+    };
+    requestAnimationFrame(poll);
 }
 
 // ============================================================
@@ -932,7 +993,7 @@ class SceneFX {
 
 const sceneFX = new SceneFX($("scene-canvas"));
 
-// ---------- 小提示条（导入结果、Safari 声音被暂停……）----------
+// ---------- 小提示条（Safari 声音被暂停……）----------
 const toastEl = $("toast");
 let toastTimer = null;
 
@@ -948,6 +1009,26 @@ function hideToast() {
     clearTimeout(toastTimer);
     toastEl.classList.add("out");
     toastTimer = setTimeout(() => { toastEl.hidden = true; }, 300);
+}
+
+// ---------- 输出延迟：蓝牙耳机会让声音晚 0.1–0.3 秒 ----------
+// 自动播放的（试听、演示、过关回放）让画面等一等，看到的和听到的才对得上；
+// 手上弹的没法让声音提前，只能提示一下是耳机的缘故
+const LAG_NOTICE = 0.09; // 外放、有线耳机一般 0.03–0.05 秒；超过这个多半是蓝牙
+let lagNoticed = false;
+
+// 画面该晚多少秒：画面本身从 JS 到屏幕也要一两帧（约 25ms），只补多出来的那部分
+function visualLag() {
+    const L = audio.latency();
+    return L ? Math.max(0, L.total - 0.025) : 0;
+}
+
+function checkLatency() {
+    const L = audio.latency();
+    if (!L || lagNoticed || !soundOn || L.total < LAG_NOTICE) return;
+    lagNoticed = true;
+    toastEl.dataset.kind = "latency";
+    showToast(`声音比按键慢了约 ${Math.round(L.total * 1000)} ms——多半是蓝牙耳机。换有线耳机或外放会跟手很多；试听和演示的画面已经自动对齐声音`, 7000);
 }
 
 // ============================================================
@@ -1107,22 +1188,26 @@ function releaseAllHeld() {
 }
 
 // ============================================================
-// 庆祝动画：canvas 粒子系统
-// 三种粒子——纸片(paper) / 飘带(ribbon) / 火花(spark)，颜色取当前这套键帽
+// 庆祝动画：一张铺满屏幕的 2D 画布上的粒子
+//   纸片(paper) / 飘带(ribbon) / 火花(spark)——普通地叠上去
+//   星芒(star) / 星尘(dust) / 光斑(orb) / 烟花弹(rocket)——"发光"地叠上去（lighter），梦境里全靠它们
+// 颜色取当前这套键帽的渐变
 // ============================================================
 const confettiCanvas = $("confetti-canvas");
 const cctx = confettiCanvas.getContext("2d");
 const bloomEl = $("screen-bloom");
 
 let particles = [];
+let pendingSpawns = []; // 烟花弹炸开时生出来的，等这一帧画完再加进去
 let rafId = null;
 let lastFrame = 0;
+let confettiDpr = 1;
 
 function sizeConfettiCanvas() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    confettiCanvas.width = Math.floor(window.innerWidth * dpr);
-    confettiCanvas.height = Math.floor(window.innerHeight * dpr);
-    cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    confettiDpr = Math.min(window.devicePixelRatio || 1, 2);
+    confettiCanvas.width = Math.floor(window.innerWidth * confettiDpr);
+    confettiCanvas.height = Math.floor(window.innerHeight * confettiDpr);
+    cctx.setTransform(confettiDpr, 0, 0, confettiDpr, 0, 0);
 }
 
 function themePalette() {
@@ -1130,13 +1215,35 @@ function themePalette() {
     return [c.glow, c.accent, c.highlight, c.alpha, c.alphaLegend];
 }
 
-const MAX_PARTICLES = 900;
+// 这一关渐变上均匀取 n 种颜色（CSS 十六进制）
+function gradPalette(n = 5) {
+    return Array.from({ length: n }, (_, i) => stage.gradientColor(n > 1 ? i / (n - 1) : 0));
+}
 
+const MAX_PARTICLES = 1100;
+
+// gravity：每帧往下加的速度（负数 = 往上飘）；drag：每帧剩下的速度比例；life：[基础, 随机多出来的]
 const PARTICLE_SPEC = {
     paper: { gravity: 0.30, drag: 0.988, life: [2.4, 1.6] },
     ribbon: { gravity: 0.15, drag: 0.972, life: [3.0, 1.8] },
     spark: { gravity: 0.02, drag: 0.930, life: [0.45, 0.35] },
+    star: { gravity: -0.012, drag: 0.952, life: [1.2, 1.3], light: true },
+    dust: { gravity: -0.008, drag: 0.94, life: [0.5, 0.7], light: true },
+    orb: { gravity: -0.035, drag: 0.985, life: [1.6, 1.6], light: true },
+    rocket: { gravity: 0.1, drag: 0.985, life: [0.9, 0.25], light: true },
 };
+
+// 星芒和光斑的小图：每种颜色画一次，之后直接贴
+const spriteCache = new Map();
+function sprite(kind, color) {
+    const key = kind + color;
+    let s = spriteCache.get(key);
+    if (!s) {
+        s = kind === "orb" ? orbSprite(color) : sparkleSprite(color);
+        spriteCache.set(key, s);
+    }
+    return s;
+}
 
 function spawn(x, y, count, opts) {
     const {
@@ -1145,6 +1252,8 @@ function spawn(x, y, count, opts) {
         speed = 12,
         kind = "paper",
         colors = themePalette(),
+        size = 1,
+        onDeath = null,
     } = opts || {};
     const spec = PARTICLE_SPEC[kind];
     for (let i = 0; i < count; i++) {
@@ -1156,18 +1265,20 @@ function spawn(x, y, count, opts) {
             spec,
             color: colors[Math.floor(Math.random() * colors.length)],
             x, y,
+            px: x, py: y,
             vx: Math.cos(a) * sp,
             vy: Math.sin(a) * sp,
             rot: Math.random() * Math.PI * 2,
-            vrot: (Math.random() - 0.5) * 0.4,
+            vrot: (Math.random() - 0.5) * (kind === "star" ? 0.08 : 0.4),
             flip: Math.random() * Math.PI * 2,      // 纸片翻面
             vflip: 0.10 + Math.random() * 0.18,
-            wob: Math.random() * Math.PI * 2,       // 飘落时的左右摆动
+            wob: Math.random() * Math.PI * 2,       // 飘落时的左右摆动；星星拿它当闪烁的相位
             w: isRibbon ? 3 + Math.random() * 2 : 5 + Math.random() * 7,
             h: isRibbon ? 22 + Math.random() * 20 : 4 + Math.random() * 6,
-            r: 1.5 + Math.random() * 2.5,           // spark 半径
+            r: (1.5 + Math.random() * 2.5) * size,   // spark / star / dust / orb 的大小
             age: 0,
             life: spec.life[0] + Math.random() * spec.life[1],
+            onDeath,
         });
     }
     // 连续快速通关时别让粒子无限堆积，超出上限就丢掉最老的
@@ -1189,28 +1300,69 @@ function stepParticles(now) {
     const H = window.innerHeight;
 
     cctx.clearRect(0, 0, window.innerWidth, H);
+    let lighter = false;
 
     particles = particles.filter((p) => {
         p.age += dt;
-        if (p.age >= p.life || p.y > H + 80) return false;
+        if (p.age >= p.life || p.y > H + 80) {
+            if (p.onDeath) pendingSpawns.push(() => p.onDeath(p.x, p.y, p.color));
+            return false;
+        }
 
         const dragF = Math.pow(p.spec.drag, f);
+        p.px = p.x;
+        p.py = p.y;
         p.vx *= dragF;
         p.vy = p.vy * dragF + p.spec.gravity * f;
         p.wob += 0.12 * f;
-        p.x += (p.vx + Math.sin(p.wob) * (p.kind === "ribbon" ? 1.1 : 0.45)) * f;
+        const sway = p.kind === "ribbon" ? 1.1 : p.kind === "paper" ? 0.45 : p.kind === "orb" ? 0.25 : 0;
+        p.x += (p.vx + Math.sin(p.wob) * sway) * f;
         p.y += p.vy * f;
         p.rot += p.vrot * f;
         p.flip += p.vflip * f;
 
-        const fade = Math.min(1, (p.life - p.age) / 0.6);
-        cctx.globalAlpha = Math.max(0, fade);
+        const fade = Math.max(0, Math.min(1, (p.life - p.age) / 0.6));
+        if (!!p.spec.light !== lighter) {
+            lighter = !!p.spec.light;
+            cctx.globalCompositeOperation = lighter ? "lighter" : "source-over";
+        }
+        cctx.globalAlpha = fade;
         cctx.fillStyle = p.color;
 
         if (p.kind === "spark") {
             cctx.beginPath();
             cctx.arc(p.x, p.y, p.r * (0.4 + fade * 0.6), 0, Math.PI * 2);
             cctx.fill();
+        } else if (p.kind === "star") {
+            // 十字星芒：一闪一闪，慢慢转
+            const tw = 0.55 + 0.45 * Math.sin(p.age * 13 + p.wob * 4);
+            const s = p.r * 7 * (0.7 + 0.3 * tw) * (0.5 + 0.5 * fade);
+            cctx.globalAlpha = fade * tw;
+            cctx.save();
+            cctx.translate(p.x, p.y);
+            cctx.rotate(p.rot);
+            cctx.drawImage(sprite("star", p.color), -s / 2, -s / 2, s, s);
+            cctx.restore();
+        } else if (p.kind === "dust" || p.kind === "rocket") {
+            // 一小段拖影：从上一帧的位置划到这一帧
+            const tail = p.kind === "rocket" ? 5 : 2.2;
+            cctx.strokeStyle = p.color;
+            cctx.lineCap = "round";
+            cctx.lineWidth = p.kind === "rocket" ? 2.4 : p.r * 0.7;
+            cctx.beginPath();
+            cctx.moveTo(p.x - (p.x - p.px) * tail, p.y - (p.y - p.py) * tail);
+            cctx.lineTo(p.x, p.y);
+            cctx.stroke();
+            if (p.kind === "rocket") {
+                cctx.fillStyle = "#ffffff";
+                cctx.beginPath();
+                cctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+                cctx.fill();
+            }
+        } else if (p.kind === "orb") {
+            const s = p.r * 7;
+            cctx.globalAlpha = fade * 0.2 * Math.min(1, p.age / 0.3);
+            cctx.drawImage(sprite("orb", p.color), p.x - s / 2, p.y - s / 2, s, s);
         } else {
             cctx.save();
             cctx.translate(p.x, p.y);
@@ -1232,6 +1384,12 @@ function stepParticles(now) {
     });
 
     cctx.globalAlpha = 1;
+    cctx.globalCompositeOperation = "source-over";
+    if (pendingSpawns.length) {
+        const list = pendingSpawns;
+        pendingSpawns = [];
+        list.forEach((fn) => fn());
+    }
 
     if (particles.length) {
         rafId = requestAnimationFrame(stepParticles);
@@ -1241,16 +1399,31 @@ function stepParticles(now) {
     }
 }
 
-// 走线回放时，每敲中一个键在它的 3D 位置上迸一小簇火花
-function sparkleAtKey(id) {
+// 一团星光：星芒 + 星尘 + 几个光斑，从 (x, y) 往四周散开，慢慢往上飘着熄掉
+function starBurst(x, y, { colors = gradPalette(), stars = 18, dust = 14, orbs = 2, speed = 5 } = {}) {
     if (reduceMotion) return;
-    const p = stage.screenOf(id);
-    if (!p) return;
-    spawn(p.x, p.y, 8, { kind: "spark", angle: -Math.PI / 2, spread: Math.PI * 2, speed: 4.5 });
+    spawn(x, y, stars, { kind: "star", angle: -Math.PI / 2, spread: Math.PI * 2, speed, colors });
+    spawn(x, y, dust, { kind: "dust", angle: -Math.PI / 2, spread: Math.PI * 2, speed: speed * 1.3, colors: [...colors, "#ffffff"] });
+    if (orbs) spawn(x, y, orbs, { kind: "orb", angle: -Math.PI / 2, spread: Math.PI * 1.2, speed: speed * 0.4, colors, size: 1.4 });
 }
 
-// 通关大礼花：全屏光晕 + 两侧礼花炮 + 键盘中心爆开
-function launchCelebration(colors) {
+// 飞行中的字母身后拖着的星尘
+function starTrail(x, y, color) {
+    spawn(x, y, 2, { kind: "dust", angle: -Math.PI / 2, spread: Math.PI * 2, speed: 1.1, colors: [color, "#ffffff"], size: 0.8 });
+    if (Math.random() < 0.35) spawn(x, y, 1, { kind: "star", angle: -Math.PI / 2, spread: Math.PI * 2, speed: 0.8, colors: [color], size: 0.8 });
+}
+
+// 一枚烟花：从屏幕底下升上去，到顶炸成一团星光
+function firework(x, colors) {
+    const H = window.innerHeight;
+    spawn(x, H + 6, 1, {
+        kind: "rocket", angle: -Math.PI / 2, spread: 0.18, speed: 15 + Math.random() * 4, colors,
+        onDeath: (bx, by, c) => starBurst(bx, by, { colors: [c, ...colors], stars: 22, dust: 26, orbs: 2, speed: 5.5 }),
+    });
+}
+
+// 通关：屏幕中间一片光晕，键盘中心炸开一团星光，底下升起几枚烟花（颜色都是这一关的渐变）
+function launchCelebration(colors, { rockets = 3 } = {}) {
     bloomEl.classList.remove("fire");
     void bloomEl.offsetWidth;
     bloomEl.classList.add("fire");
@@ -1258,20 +1431,16 @@ function launchCelebration(colors) {
 
     const W = window.innerWidth;
     const H = window.innerHeight;
-    const palette = colors || themePalette();
-
-    spawn(-10, H * 0.98, 80, { angle: -Math.PI * 0.30, spread: 0.5, speed: 21, colors: palette });
-    spawn(W + 10, H * 0.98, 80, { angle: -Math.PI * 0.70, spread: 0.5, speed: 21, colors: palette });
-    spawn(-10, H * 0.98, 14, { angle: -Math.PI * 0.30, spread: 0.4, speed: 18, kind: "ribbon", colors: palette });
-    spawn(W + 10, H * 0.98, 14, { angle: -Math.PI * 0.70, spread: 0.4, speed: 18, kind: "ribbon", colors: palette });
+    const palette = colors || gradPalette();
 
     const g = stage.canvas.getBoundingClientRect();
     const cx = g.width ? g.left + g.width / 2 : W / 2;
     const cy = g.height ? g.top + g.height / 2 : H / 2;
-    setTimeout(() => {
-        spawn(cx, cy, 46, { angle: -Math.PI / 2, spread: Math.PI * 2, speed: 11, colors: palette });
-        spawn(cx, cy, 26, { angle: -Math.PI / 2, spread: Math.PI * 2, speed: 7, kind: "spark", colors: palette });
-    }, 110);
+    starBurst(cx, cy, { colors: palette, stars: 34, dust: 30, orbs: 3, speed: 7 });
+    for (let i = 0; i < rockets; i++) {
+        const x = W * (0.18 + (0.64 * (i + 0.5)) / rockets) + (Math.random() - 0.5) * W * 0.08;
+        setTimeout(() => firework(x, palette), 120 + i * 260 + Math.random() * 120);
+    }
 }
 
 // ============================================================
@@ -1299,7 +1468,9 @@ function showScreen(name) {
     currentScreen = name;
     if (canFade) {
         try {
-            document.startViewTransition(() => swapScreen(prev, name));
+            const vt = document.startViewTransition(() => swapScreen(prev, name));
+            // 连着换屏时前一次过渡会被跳过，ready 会 reject（AbortError）：这是预期的，别让它变成控制台里的未处理错误
+            vt.ready.catch(() => {});
             return;
         } catch (err) { /* 退回直接切 */ }
     }
@@ -1344,6 +1515,7 @@ function leaveScreen(name) {
     } else if (name === "music") {
         stopPlayback();
         setFollow(false);
+        if (abyssOn) teardownAbyss();
         musicPlayer.releaseAll();
         physicalAlter = 0;
         applyAlter();
@@ -1355,11 +1527,14 @@ function leaveScreen(name) {
     }
     if (name === "reward") {
         clearRewardTimers();
+        stopLetterGame();
         $("fly-layer").innerHTML = "";
     }
 }
 
 function enterScreen(name) {
+    // 醒来：离开过关页就退出梦境（回放还在关卡页上跑的那一下除外）
+    if (name !== "reward" && !(name === "game" && replaying)) leaveDream();
     stage.releasePointers();
     stage.attach($("stage-" + name), { touch: name === "home" ? "pan-y" : "none" });
     stage.setActive(true);
@@ -1368,6 +1543,11 @@ function enterScreen(name) {
     stage.setTowerVisible(name === "final");
     stage.path.growRate = 7;
     stage.path.setFlow(null);
+    // 过关仪式里的浮起、流光、亮点，换屏时全部归位
+    stage.path.setComet(null);
+    stage.path.setShift(0);
+    stage.path.setLift(0);
+    stage.path.lift = 0;
     if (name === "home") setupHome();
     else if (name === "game") setupGame();
     else if (name === "reward") setupReward();
@@ -1588,7 +1768,7 @@ function drawSignature(p) {
     const n = Math.round(p * SIGNATURE.length);
     if (n === sigShown) return;
     sigShown = n;
-    stage.setPath(SIGNATURE.slice(0, n), { grow: !reduceMotion });
+    stage.setPath(SIGNATURE.slice(0, n), { grow: !reduceMotion, span: SIGNATURE.length });
     SIGNATURE.forEach((id, i) => {
         const on = i < n;
         stage.setKey(id, { glow: on ? 0.75 : 0.08, lift: i === n - 1 ? 0.08 : 0, legendGlow: on ? 0.3 : 0 });
@@ -1787,6 +1967,8 @@ const state = {
     keys: [],
     levelKeySet: new Set(),
     endKey: null,           // 本关必须收尾的键，null 表示不限制
+    startKey: null,         // 本关必须从哪个键出发（第 13、14 关），null 表示随意
+    order: [],              // 必须按顺序经过的键（第 14 关的 W O R L D）
     path: [],
     locked: false,
     pendingLetters: "",     // 开局就选好、已经发给 AI 的那几个字母
@@ -1858,11 +2040,14 @@ function startLevel(n) {
     }
     state.keys = keys;
     state.levelKeySet = new Set(keys);
-    state.endKey = n >= END_TARGET_FROM_LEVEL ? pickEndKey(keys) : null;
+    const design = LEVELS[n - 1].design;
+    state.startKey = design ? design.start || null : null;
+    state.order = design && design.order ? design.order.split("") : [];
+    state.endKey = design ? design.end || null : n >= END_TARGET_FROM_LEVEL ? pickEndKey(keys) : null;
     // 一条已知能走通的路：随机走法本身就是一条解，除非终点被换成了别的键，那就现算一条
-    state.solution = !state.endKey || state.endKey === keys[keys.length - 1]
+    state.solution = design || !state.endKey || state.endKey === keys[keys.length - 1]
         ? keys.slice()
-        : solveFrom([], state.levelKeySet, state.endKey, 3000000) || null;
+        : solveFrom([], { budget: 3000000 }) || null;
     state.afterSkip = false;
     hintUndo = null;
     skipArmedAt = 0;
@@ -1900,26 +2085,43 @@ function gameView() {
 }
 
 // 亮着的键 = 这一关要走完的键；走过的沉下去、标上第几步；当前那颗抬起来发亮；
-// 终点键上方悬着一圈光环，走到了才收起来
+// 途经点（第 14 关）用强调色、左上角标着第几站；光环指着"现在该去哪"：还没开走时是起点，之后是终点
 function renderGameKeys(grow = true) {
     const cw = colorway;
     const order = new Map(state.path.map((id, i) => [id, i]));
     const current = state.path[state.path.length - 1];
+    const total = state.levelKeySet.size;
+    const want = nextWaypoint();
     state.levelKeySet.forEach((id) => {
+        const wp = state.order.indexOf(id);
+        const step = order.get(id);
         if (id === current) {
-            stage.setKey(id, { dim: 0, lift: 0.1, glow: 1.25, emissive: 0.45, legendGlow: 0.35, pulse: 0.6 });
+            stage.setKey(id, { dim: 0, lift: 0.1, glow: 1.25, emissive: 0.45, legendGlow: 0.35, pulse: 0.6, glowColor: stepColor(step, total) });
         } else if (order.has(id)) {
-            stage.setKey(id, { dim: 0.18, lift: -0.05, glow: 0.7, emissive: 0.2, legendGlow: 0.15, pulse: 0 });
+            stage.setKey(id, { dim: 0.18, lift: -0.05, glow: 0.7, emissive: 0.2, legendGlow: 0.15, pulse: 0, glowColor: stepColor(step, total) });
+        } else if (wp >= 0) {
+            stage.setKey(id, { dim: 0, lift: 0.06, glow: 0.6, emissive: 0.14, legendGlow: 0.25, pulse: id === want ? 0.9 : 0.12, glowColor: cw.accent });
         } else {
-            stage.setKey(id, { dim: 0, lift: 0.04, glow: 0.3, emissive: 0.08, legendGlow: 0, pulse: id === state.endKey ? 0.35 : 0, glowColor: null });
+            const anchor = id === state.endKey || (id === state.startKey && !state.path.length);
+            stage.setKey(id, { dim: 0, lift: 0.04, glow: 0.3, emissive: 0.08, legendGlow: 0, pulse: anchor ? 0.35 : 0, glowColor: null });
         }
-        if (order.has(id)) legend(id, { badge: order.get(id) + 1, badgeBg: cw.glow, badgeColor: cw.bg });
+        if (order.has(id)) legend(id, { badge: step + 1, badgeBg: stepColor(step, total), badgeColor: cw.bg });
+        else if (wp >= 0) legend(id, id === state.endKey
+            ? { badge: wp + 1, badgeBg: cw.accent, badgeColor: cw.accentLegend, sub: "终点" }
+            : { badge: wp + 1, badgeBg: cw.accent, badgeColor: cw.accentLegend });
+        else if (id === state.startKey && !state.path.length) legend(id, { sub: "起点" });
         else if (id === state.endKey) legend(id, { sub: "终点" });
         else legend(id, {});
     });
-    stage.setTargetKey(state.endKey && !order.has(state.endKey) ? state.endKey : null);
-    stage.setPath(state.path, { grow: grow && !reduceMotion });
+    const ring = !state.path.length && state.startKey ? state.startKey : state.endKey && !order.has(state.endKey) ? state.endKey : null;
+    stage.setTargetKey(ring);
+    stage.setPath(state.path, { grow: grow && !reduceMotion, span: total });
     updateLevelInfo();
+}
+
+// 走线的颜色：从起点到终点顺着这一关配色的渐变走（第几步就取渐变上的第几段）
+function stepColor(i, total) {
+    return stage.gradientColor(total > 1 ? i / (total - 1) : 0);
 }
 
 function updateLevelInfo() {
@@ -1930,13 +2132,43 @@ function updateLevelInfo() {
         return;
     }
     const end = state.endKey ? escapeText(label(state.endKey)) : "";
+    const start = state.startKey ? escapeText(label(state.startKey)) : "";
+    const route = state.order.length ? state.order.map((k) => escapeText(label(k))).join(" → ") : "";
     if (state.path.length > 0) {
-        el.innerHTML = `还剩 <b>${total - state.path.length}</b> 个键` + (end ? `，终点是 <b>${end}</b>` : "");
+        const want = nextWaypoint();
+        el.innerHTML = `还剩 <b>${total - state.path.length}</b> 个键` +
+            (want ? `，下一站 <b>${escapeText(label(want))}</b>` : "") +
+            (end ? `，终点是 <b>${end}</b>` : "");
+    } else if (start && route) {
+        el.innerHTML = `本关 <b>${total}</b> 个键：从 <b>${start}</b> 出发，按顺序经过 <b>${route}</b>，最后停在 <b>${end}</b> 上`;
+    } else if (start) {
+        el.innerHTML = `本关 <b>${total}</b> 个键：从 <b>${start}</b> 出发，停在 <b>${end}</b> 上——起点和终点都定死了`;
     } else if (end) {
         el.innerHTML = `本关 <b>${total}</b> 个键，起点随意，但必须停在 <b>${end}</b> 上`;
     } else {
         el.innerHTML = `本关 <b>${total}</b> 个键，任意一个亮着的键都可以作为起点`;
     }
+    renderRoute();
+}
+
+// 第 14 关：还没经过的途经点里，排在最前面的那个
+function nextWaypoint() {
+    return state.order.find((k) => !state.path.includes(k)) || null;
+}
+
+// 途经点的进度条：W O R L D 五颗小键帽，经过一个亮一个
+function renderRoute() {
+    const el = $("hud-route");
+    if (!state.order.length || !state.levelKeySet.size) {
+        el.hidden = true;
+        return;
+    }
+    el.hidden = false;
+    const want = nextWaypoint();
+    el.innerHTML = state.order.map((k) => {
+        const cls = state.path.includes(k) ? "done" : k === want ? "next" : "";
+        return `<kbd class="${cls}">${escapeText(label(k))}</kbd>`;
+    }).join('<span class="hr-arrow" aria-hidden="true"></span>');
 }
 
 // ---------- 关卡里的声音：每关一件乐器 ----------
@@ -1962,11 +2194,17 @@ function playFlourish() {
     [0, 2, 4, 6, 9].forEach((idx, i) => {
         audio.play(snd.patch, scaleFreqOf(snd, idx), { when: i * 0.075, velocity: 0.85, length: 1.3, pan: (i - 2) * 0.18 });
     });
+    // 底下垫一个低八度的根音，慢慢涨上来：超新星炸开时的那一声"嗡"
+    if (!reduceMotion) audio.play("pad", scaleFreqOf(snd, 0) / 2, { velocity: 0.55, length: 1.6 });
 }
 
 function handleKeyPress(id) {
     if (currentScreen !== "game" || state.locked) return;
     if (!state.levelKeySet.has(id)) return;
+    if (state.path.length === 0 && state.startKey && id !== state.startKey) {
+        flashError(id, `这一关得从 ${label(state.startKey)} 出发～`);
+        return;
+    }
     if (state.path.length > 0) {
         const last = state.path[state.path.length - 1];
         if (state.path.includes(id) || !ADJ[last].includes(id)) {
@@ -1974,14 +2212,26 @@ function handleKeyPress(id) {
             return;
         }
     }
+    // 途经点要按顺序：还没轮到的那几个先不能踩
+    const want = nextWaypoint();
+    if (want && state.order.includes(id) && id !== want) {
+        flashError(id, `要先经过 ${label(want)}，才能走到 ${label(id)}`);
+        return;
+    }
+    // 终点留到最后一步：提前踩上去，后面就再也走不出来了
+    if (state.endKey && id === state.endKey && state.path.length < state.levelKeySet.size - 1) {
+        flashError(id, `${label(id)} 是终点，要留到最后一步再踩～`);
+        return;
+    }
     state.path.push(id);
+    // 先发声、再更新画面：声音越早排进音频线程越跟手
+    playStep(state.path.length - 1, state.levelKeySet.size, id);
     hintUndo = null;
     feedback("");
     renderGameKeys(true);
     stage.pop(id);
     stage.flare(id);
     stage.ripple(id, { strength: 0.45, speed: 7, life: 1 });
-    playStep(state.path.length - 1, state.levelKeySet.size, id);
 
     if (state.path.length === state.levelKeySet.size) {
         if (state.endKey && id !== state.endKey) {
@@ -1999,15 +2249,15 @@ function handleKeyPress(id) {
     }
 }
 
-function flashError(id) {
+function flashError(id, message) {
+    playErrorNote();
     stage.shake(id);
     stage.flare(id, ERROR_COLOR);
     stage.ripple(id, { color: ERROR_COLOR, strength: 0.5, speed: 6, life: 0.7 });
-    playErrorNote();
     feedback(
-        state.path.includes(id) ? "这个键已经走过了，换一个试试～" : "这个键不相邻，只能走上下左右紧挨着的键～",
+        message || (state.path.includes(id) ? "这个键已经走过了，换一个试试～" : "这个键不相邻，只能走上下左右紧挨着的键～"),
         true,
-        1400
+        message ? 2000 : 1400
     );
 }
 
@@ -2030,22 +2280,26 @@ function restartCurrentLevel() {
 }
 
 // ---------- 提示：告诉你下一步走哪；已经走进死路的话，告诉你退回到第几步 ----------
-// 从当前这条路往后找一条能走完（并且停在终点上）的走法。
+// 从当前这条路往后找一条能走完的走法：停在终点上、从指定起点出发、途经点按顺序。
 // 返回剩下要走的键；null = 确定走不通；undefined = 算不过来（预算用完）
 const OUT_OF_BUDGET = {};
 
-function solveFrom(path, keySet, end, budget = 300000) {
-    const n = keySet.size;
+function solveFrom(path, { budget = 300000, keys = state.levelKeySet, end = state.endKey, start = state.startKey, order = state.order } = {}) {
+    const n = keys.size;
     const visited = new Set(path);
     const out = [];
     let steps = budget;
-    const free = (id) => keySet.has(id) && !visited.has(id);
+    const cp = new Map(order.map((k, i) => [k, i]));
+    const free = (id) => keys.has(id) && !visited.has(id);
     const onward = (id) => ADJ[id].filter(free).length;
+    // 这条路已经按顺序经过了几个途经点
+    let passed = 0;
+    while (passed < order.length && visited.has(order[passed])) passed++;
 
     // 剪枝：剩下的键里，只有一个出口的"死胡同"最多只能有一个（它得是终点）；没有出口的一个都不能有
     const prune = (cur) => {
         let deadEnds = 0;
-        for (const id of keySet) {
+        for (const id of keys) {
             if (visited.has(id)) continue;
             let deg = 0;
             for (const nx of ADJ[id]) if (nx === cur || free(nx)) deg++;
@@ -2059,17 +2313,18 @@ function solveFrom(path, keySet, end, budget = 300000) {
         return false;
     };
 
-    function dfs(cur) {
-        if (visited.size === n) return !end || cur === end;
+    function dfs(cur, next) {
+        if (visited.size === n) return (!end || cur === end) && next === order.length;
         if (--steps <= 0) throw OUT_OF_BUDGET;
         if (prune(cur)) return false;
         const left = n - visited.size;
-        const next = ADJ[cur].filter((id) => free(id) && (!end || id !== end || left === 1));
-        next.sort((a, b) => onward(a) - onward(b));
-        for (const nx of next) {
+        const cand = ADJ[cur].filter((id) =>
+            free(id) && (!end || id !== end || left === 1) && (!cp.has(id) || cp.get(id) === next));
+        cand.sort((a, b) => onward(a) - onward(b));
+        for (const nx of cand) {
             visited.add(nx);
             out.push(nx);
-            if (dfs(nx)) return true;
+            if (dfs(nx, cp.has(nx) ? next + 1 : next)) return true;
             visited.delete(nx);
             out.pop();
         }
@@ -2078,17 +2333,18 @@ function solveFrom(path, keySet, end, budget = 300000) {
 
     try {
         if (path.length === 0) {
-            for (const s of keySet) {
+            for (const s of start ? [start] : keys) {
                 if (end && s === end && n > 1) continue;
+                if (cp.has(s) && cp.get(s) !== 0) continue;
                 visited.add(s);
                 out.push(s);
-                if (dfs(s)) return out;
+                if (dfs(s, cp.has(s) ? 1 : 0)) return out;
                 visited.delete(s);
                 out.pop();
             }
             return null;
         }
-        return dfs(path[path.length - 1]) ? out : null;
+        return dfs(path[path.length - 1], passed) ? out : null;
     } catch (err) {
         if (err === OUT_OF_BUDGET) return undefined;
         throw err;
@@ -2116,7 +2372,7 @@ function showHint() {
     if (sol && state.path.every((id, i) => sol[i] === id)) {
         next = sol[state.path.length];
     } else {
-        const rest = solveFrom(state.path, state.levelKeySet, state.endKey);
+        const rest = solveFrom(state.path);
         if (rest === undefined) {
             feedback("这一步岔路太多，一下子算不过来——先撤销几步再点提示", false, 2600);
             return;
@@ -2125,7 +2381,7 @@ function showHint() {
         else {
             // 走进死路了：往回找最近的一个还能走通的位置
             for (let k = state.path.length - 1; k >= 0; k--) {
-                const r = solveFrom(state.path.slice(0, k), state.levelKeySet, state.endKey, 120000);
+                const r = solveFrom(state.path.slice(0, k), { budget: 120000 });
                 if (r && r.length) {
                     hintUndo = { len: k, next: r[0] };
                     const back = state.path.length - k;
@@ -2175,7 +2431,7 @@ function skipLevel() {
     skipArmedAt = 0;
     clearTimeout(skipTimer);
     resetSkipBtn();
-    const sol = state.solution || solveFrom([], state.levelKeySet, state.endKey, 3000000);
+    const sol = state.solution || solveFrom([], { budget: 3000000 });
     const level = state.level;
     const finish = () => {
         state.runs.set(level, { path: (sol || state.keys).slice(), letters: pickLetters(sol || state.keys), sentence: null, skipped: true });
@@ -2204,7 +2460,8 @@ function skipLevel() {
 }
 
 // ---------- 过关的那句话：一张小海报 ----------
-// 句子用衬线斜体，每个词的首字母单独拎出来——它们等一下会从 3D 键盘上飞过来
+// 句子用衬线斜体，每个词的首字母单独拎出来，颜色顺着这一关的渐变一个一个排过去；
+// 首字母一开始是空着的——等你在键盘上把它们一个个"放飞"回来
 function renderPoster(sentence, letters, level) {
     const cw = levelColorway(level);
     const inst = INSTRUMENTS[LEVEL_SOUND[level - 1].patch];
@@ -2216,10 +2473,13 @@ function renderPoster(sentence, letters, level) {
     const p = document.createElement("p");
     p.className = "poster-sentence";
     const want = new Set(String(letters || "").toLowerCase().split(""));
-    sentence.split(/\s+/).filter(Boolean).forEach((word) => {
+    const words = sentence.split(/\s+/).filter(Boolean);
+    words.forEach((word, i) => {
         const m = /^([^A-Za-z]*)([A-Za-z])(.*)$/.exec(word);
         const w = document.createElement("span");
         w.className = "pw";
+        w.style.setProperty("--i", i);
+        w.style.setProperty("--pw-c", stage.gradientColor(words.length > 1 ? i / (words.length - 1) : 0));
         if (m) {
             const ch = m[2].toLowerCase();
             w.dataset.letter = ch;
@@ -2230,6 +2490,7 @@ function renderPoster(sentence, letters, level) {
             }
             w.innerHTML = `${escapeText(m[1])}<span class="pw-i">${escapeText(m[2])}</span><span class="pw-r">${escapeText(m[3])}</span>`;
         } else {
+            w.classList.add("landed");
             w.innerHTML = `<span class="pw-r">${escapeText(word)}</span>`;
         }
         p.appendChild(w);
@@ -2245,75 +2506,176 @@ function renderPoster(sentence, letters, level) {
     return wrap;
 }
 
-// 首字母起飞：从它在 3D 键盘上的那颗键帽升起来，划一道弧，落进句子里；落定时弹一个音
-function flyInitials(poster, level) {
-    const words = [...poster.querySelectorAll(".pw")];
-    const layer = $("fly-layer");
-    const r = stage.canvas.getBoundingClientRect();
-    const visible = currentScreen === "reward" && r.bottom > 0 && r.top < window.innerHeight && !document.hidden;
-    const snd = levelSoundFor(level);
-    let landed = 0;
-    words.forEach((w, i) => {
-        const ch = w.dataset.letter;
-        const init = w.querySelector(".pw-i");
-        const delay = 200 + i * 105;
-        const land = () => {
-            w.classList.add("landed");
-            if (currentScreen === "reward" && ch) {
-                const deg = landed++ % (snd.scale.length * 2);
-                audio.play(snd.patch, scaleFreqOf(snd, deg), { velocity: 0.3, length: 0.6, pan: (i / Math.max(1, words.length - 1) - 0.5) * 0.8 });
-            }
-        };
-        if (!ch || !init || reduceMotion || !visible || !stage.keys.has(ch)) {
-            setTimeout(() => w.classList.add("landed"), reduceMotion ? 0 : delay);
-            return;
-        }
-        const from = stage.screenOf(ch);
-        const tr = init.getBoundingClientRect();
-        const to = { x: tr.left + tr.width / 2, y: tr.top + tr.height / 2 };
-        const fly = document.createElement("span");
-        fly.className = "fly-letter" + (w.classList.contains("hit") ? " hit" : "");
-        fly.textContent = init.textContent;
-        fly.style.fontSize = getComputedStyle(init).fontSize;
-        layer.appendChild(fly);
-        const midX = (from.x + to.x) / 2 + (Math.random() - 0.5) * 120;
-        const midY = Math.min(from.y, to.y) - 50 - Math.random() * 70;
-        const anim = fly.animate([
-            { transform: `translate(${from.x}px, ${from.y}px) translate(-50%, -50%) scale(0.4)`, opacity: 0 },
-            { transform: `translate(${from.x}px, ${from.y - 50}px) translate(-50%, -50%) scale(1.5)`, opacity: 1, offset: 0.24 },
-            { transform: `translate(${midX}px, ${midY}px) translate(-50%, -50%) scale(1.25) rotate(${(Math.random() - 0.5) * 30}deg)`, opacity: 1, offset: 0.62 },
-            { transform: `translate(${to.x}px, ${to.y}px) translate(-50%, -50%) scale(1)`, opacity: 1 },
-        ], { duration: 1150, delay, easing: "cubic-bezier(.45,.05,.2,1)", fill: "both" });
-        setTimeout(() => {
-            if (currentScreen !== "reward") return;
-            stage.pop(ch);
-            stage.flare(ch);
-            stage.ripple(ch, { strength: 0.45, life: 1 });
-        }, delay);
-        anim.onfinish = () => {
-            fly.remove();
-            land();
-        };
-        anim.oncancel = () => fly.remove();
+// ============================================================
+// 过关仪式——一场梦
+//   ① 入梦：最后一步落下，键盘的灯暗下去、光留下来（泛光），页面背后浮出星空；音符的尾巴拖得很长
+//   ② 彗星：一颗亮点顺着整条线从起点跑到终点，一路撒星尘；经过哪个键，哪个键弹一下、响一声、升起一道细光
+//   ③ 超新星：到终点炸开——一团星尘、两圈彩虹色的冲击波荡满整块键盘、几枚星光烟花
+//   ④ 浮起：过关页上笔迹重新画一遍（笔尖撒着星星），然后整条离开键盘悬在上面，像萤火一样一直往外冒星点
+//   ⑤ 拾字：每个词的首字母像一盏灯挂在它那颗键上方——按下它（或点它），键里升起一道光，
+//      字母拖着星尘飞回句子里，一个字母一个音；空格一次全放飞，Enter 直接去下一关
+//   ⑥ 成句：整条线"呼"出一口星星，冲击波荡开，一道彩虹光扫过句子，收一个和弦
+//   离开过关页时一切慢慢醒回来
+// ============================================================
+const dream = stage ? new Dream(stage) : null;
+const dreamSky = new DreamSky($("dream-canvas"), { reduced: reduceMotion });
+let dreaming = false;
+let replaying = false;
+
+// 这套配色有多亮（0 = 深色外壳和键帽，1 = 奶白、粉白那种）：梦里浅色的键盘要压得更深
+function colorwayBrightness(cw = colorway) {
+    const lum = (hex) => {
+        const n = parseInt(String(hex).slice(1, 7), 16);
+        const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+    };
+    const l = 0.6 * lum(cw.case) + 0.4 * lum(cw.alpha);
+    return Math.max(0, Math.min(1, (l - 0.12) / 0.45));
+}
+
+function enterDream() {
+    if (!dream || reduceMotion || dreaming) return;
+    dreaming = true;
+    const bright = colorwayBrightness();
+    dream.begin({ bloom: 1.1, haze: 0.3 - 0.12 * bright, aberr: 0.005 });
+    stage.setDreamLight(1, { bright });
+    audio.setDreamTail(0.6);
+    document.body.classList.add("dreaming");
+    dreamSky.show(gradPalette(4));
+}
+
+function leaveDream() {
+    if (!dreaming) return;
+    dreaming = false;
+    dream.end();
+    stage.setDreamLight(0);
+    audio.setDreamTail(0);
+    document.body.classList.remove("dreaming");
+    dreamSky.hide();
+}
+
+// 一条路上第 i 个键的光点（算上整条线浮起来的高度）
+function pathPointOf(id) {
+    const p = stage.keyTop(id);
+    if (p) p.y += stage.path.lift;
+    return p;
+}
+
+// 整条线"呼"出一口星星：每个键上冒一小团，颜色顺着渐变
+function exhaleStars(path, { count = 8, speed = 1.3, life = [1.4, 2.8] } = {}) {
+    if (!dreaming || !path.length) return;
+    const n = path.length;
+    path.forEach((id, i) => {
+        dream.emit(pathPointOf(id), {
+            count, speed, spread: 1.1, life, size: [0.06, 0.2], buoy: 0.55, star: 0.45,
+            colors: [stage.gradientColor(n > 1 ? i / (n - 1) : 0), "#ffffff"],
+        });
     });
 }
 
-// 通关回放：整条线亮一下，然后顺着走过的路一个键一个键地弹回去
 function playVictoryReplay() {
     return new Promise((resolve) => {
-        const total = state.path.length;
-        const stepDelay = Math.min(90, Math.max(30, 900 / total));
+        const path = state.path.slice();
+        const total = path.length;
+        // 手快的时候最后几步的线还在长：先一下子画满，彗星才有路可跑
+        stage.path.complete();
         stage.pulsePath();
-        state.path.forEach((id, i) => {
-            setTimeout(() => {
-                stage.pop(id);
-                stage.flare(id);
-                sparkleAtKey(id);
-                playStep(i, total, id);
-                if (i === total - 1) stage.ripple(id, { strength: 1.3, speed: 10, width: 1.4, life: 1.7 });
-            }, i * stepDelay);
+        if (reduceMotion || !total) {
+            resolve();
+            return;
+        }
+        replaying = true;
+        enterDream();
+        // 梦里让线和星星当光源：走过的键退暗、不再自己发光，序号也收起来
+        path.forEach((id, i) => {
+            stage.setKey(id, { dim: 0.3, lift: 0, glow: 0.28, emissive: 0, legendGlow: 0, pulse: 0, glowColor: stepColor(i, total) });
+            legend(id, {});
         });
-        setTimeout(resolve, total * stepDelay + 280);
+        stage.setTargetKey(null);
+        const T = Math.min(3.6, Math.max(2, 1.4 + total * 0.055));
+        // 每个键在整条线上的位置（按弧长），亮点到了才响
+        const pts = path.map((id) => stage.keyTop(id));
+        const cum = [0];
+        for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
+        const len = cum[cum.length - 1] || 1;
+        const colors = gradPalette(6);
+        const colorAt = (i) => stage.gradientColor(total > 1 ? i / (total - 1) : 0);
+        // 蓝牙耳机的声音晚到：音符提前这么多秒排，耳朵听到的那一刻彗星正好到
+        const lead = Math.min(0.35, visualLag());
+        let nextSound = 0;
+        let nextKey = 0;
+        let done = false;
+        const t0 = stage.time;
+        const view = gameView();
+        const ease = (u) => (u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2);
+        // 镜头：压低、推近，跟着彗星从左往右慢慢摇过去
+        const shoot = (e) => stage.setView({ ...view, el: view.el + 5 - 7 * Math.sin(Math.PI * e), az: -9 + 18 * e, zoom: 0.88, speed: 1.4 });
+        const stop = () => {
+            done = true;
+            off();
+            clearTimeout(safety);
+            replaying = false;
+            stage.path.setComet(null);
+            stage.path.setShift(0);
+        };
+        const finish = () => {
+            if (done) return;
+            stop();
+            const end = path[total - 1];
+            const p = stage.keyTop(end, 0.02);
+            // 超新星：终点炸开一团星尘，两圈彩虹色的冲击波荡满整块键盘，泛光猛地一亮
+            dream.flash(1.5);
+            dream.emit(p, { count: 150, speed: 4.5, spread: 2, life: [1.6, 3.4], size: [0.07, 0.24], colors, buoy: 0.25, drag: 1.3, star: 0.4 });
+            dream.ring(p, { colors: [colors[0], colors[5]], radius: 9.5, life: 2, width: 0.045 });
+            dream.ring(p, { colors: [colors[2], colors[4]], radius: 6.5, life: 2.2, width: 0.07, delay: 0.2, gain: 1 });
+            stage.ripple(end, { strength: 1.5, speed: 9, width: 1.6, life: 2.1 });
+            stage.pulsePath();
+            if (currentScreen === "game") stage.setView(view);
+            resolve();
+        };
+        const off = stage.onTick(() => {
+            // 回放途中人切去了别的屏（音乐模式）：安静地收掉，别在那边放烟花
+            if (currentScreen !== "game") {
+                stop();
+                resolve();
+                return;
+            }
+            const u = Math.min(1, (stage.time - t0) / T);
+            const e = ease(u);
+            stage.path.setComet(e, { size: 1.2 });
+            // 颜色沿线荡一个来回，到终点刚好回到原样
+            stage.path.setShift(e * 2);
+            shoot(e);
+            // 彗星一路撒星尘
+            const head = stage.path.cometWorld();
+            if (head) {
+                dream.emit(head, {
+                    count: 4, speed: 0.7, spread: 2, life: [0.6, 1.6], size: [0.05, 0.15], buoy: 0.3, drag: 2.2, star: 0.3,
+                    colors: [stage.gradientColor(e), "#ffffff"],
+                });
+            }
+            // 声音按"提前量"走，画面按彗星走
+            const eSound = ease(Math.min(1, u + lead / T));
+            while (nextSound < total && cum[nextSound] / len <= eSound + 1e-6) {
+                playStep(nextSound, total, path[nextSound], 0.85);
+                nextSound++;
+            }
+            while (nextKey < total && cum[nextKey] / len <= e + 1e-6) {
+                const id = path[nextKey];
+                const c = colorAt(nextKey);
+                stage.pop(id);
+                stage.flare(id, c);
+                stage.setKey(id, { glow: 0.55 });
+                const kp = stage.keyTop(id, 0.02);
+                dream.emit(kp, { count: 12, speed: 1.8, spread: 0.9, life: [0.8, 1.8], size: [0.05, 0.17], colors: [c, "#ffffff"], buoy: 0.45, star: 0.35 });
+                dream.pillar(kp, { color: c, height: 2.6, width: 0.6, life: 1.2, gain: 1.6 });
+                nextKey++;
+            }
+            if (u >= 1) finish();
+        });
+        shoot(0);
+        // 页面切到后台时 rAF 不跑：保险丝，别让流程卡在这里
+        const safety = setTimeout(finish, T * 1000 + 2500);
     });
 }
 
@@ -2324,8 +2686,11 @@ async function completeLevel() {
     feedback("");
     stage.setTargetKey(null);
     await playVictoryReplay();
-    playFlourish();
-    launchCelebration();
+    // 回放途中切去了音乐模式：那边不放烟花、不响收尾
+    if (currentScreen === "game") {
+        playFlourish();
+        launchCelebration();
+    }
 
     const level = state.level;
     const path = state.path.slice();
@@ -2334,14 +2699,17 @@ async function completeLevel() {
     const run = { path, letters: picked, sentence: null };
     state.runs.set(level, run);
 
-    $("reward-sequence").textContent = path.map(label).join("");
     $("reward-level-num").textContent = pad2(level);
     $("reward-level-total").textContent = pad2(TOTAL_LEVELS);
     $("btn-next").textContent = level >= TOTAL_LEVELS ? "完成" : "下一关";
+    $("btn-next").classList.remove("ready");
+    stopLetterGame();
     const token = ++rewardToken;
     const msgEl = $("reward-message");
     showLoading(msgEl, picked);
-    // 回放那一秒里点开了音乐模式的话，别把人拽出来，等他回来再看
+    resetRewardIntro();
+    // 超新星的光和烟花先看一会儿再换屏。这一会儿里点开了音乐模式的话，别把人拽出来，等他回来再看
+    await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 1300));
     if (currentScreen === "game") showScreen("reward");
     else if (currentScreen === "music") musicReturnTo = "reward";
     resumeScreen = "reward";
@@ -2359,12 +2727,28 @@ async function completeLevel() {
     }
 }
 
-// ---------- 过关：从正上方看这一关的笔迹，笔尖走到哪个键哪个键亮 ----------
+// ---------- 过关：斜上方看这一关的笔迹，笔尖走到哪个键哪个键亮；画完整条笔迹浮起来 ----------
 let rewardTimers = [];
+let rewardPath = [];
+let rewardTouchedAt = 0; // 最后一次在过关页上按键 / 点灯的时刻：停手太久，星星就不再冒了（画面能停下来省电）
+// 过关页的开场（画线 → 浮起）演完了没有。句子可能比开场先到，字母要等开场演完才挂出来。
+// 换屏走的是视图过渡，setupReward 会晚一拍才跑——所以"开场还没演"这个状态在决定换屏的那一刻就要立起来
+let rewardIntro = Promise.resolve();
+let introResolve = null;
+
+function resetRewardIntro() {
+    rewardIntro = new Promise((r) => { introResolve = r; });
+}
 
 function clearRewardTimers() {
     rewardTimers.forEach(clearTimeout);
     rewardTimers = [];
+}
+
+// 走过的键连成一行字，颜色和线一样顺着渐变排
+function renderSequence(path) {
+    const el = $("reward-sequence");
+    el.innerHTML = path.map((id, i) => `<span style="color:${stepColor(i, path.length)}">${escapeText(label(id))}</span>`).join("");
 }
 
 function setupReward() {
@@ -2374,31 +2758,394 @@ function setupReward() {
     const path = run ? run.path : state.path;
     stage.resetKeys({ dim: 1 });
     clearLegends();
-    stage.setInteractive((id) => id === "knob");
+    stage.setInteractive((id) => id === "knob" || !!(letterGame && letterGame.pending.has(id)));
     stage.setPath([], { grow: false });
-    stage.setView({ region: regionOf(path, 0.9), az: 0, el: 76, fov: 30, margin: 0.08 });
-    if (!path.length) return;
+    // 梦里斜一点看：星星往上飘看得出来；镜头之后会轻轻地漂
+    const view = { region: regionOf(path, 0.9), az: 0, el: reduceMotion ? 76 : 64, fov: 30, margin: 0.08 };
+    stage.setView(view);
+    rewardPath = path.slice();
+    rewardTouchedAt = performance.now();
+    enterDream();
+    if (dreaming) dream.setLevel(1, 0.3);
+    renderSequence(path);
+    if (!introResolve) resetRewardIntro();
+    const resolveIntro = introResolve;
+    const introDone = () => {
+        if (introResolve === resolveIntro) introResolve = null;
+        resolveIntro();
+    };
+    if (!path.length) {
+        introDone();
+        return;
+    }
 
     path.forEach((id) => stage.setKey(id, { dim: 0.35, glow: 0.12 }));
     stage.setPath(path, { grow: !reduceMotion });
     if (!reduceMotion) stage.path.setFlow({ count: 3, speed: 3 });
-    const rate = Math.max(7, stage.path.length / 1.8);
+    // 刚在关卡里回放过一遍，这里画快一点（最多 1.2 秒），好让字母早点挂出来
+    const rate = Math.max(8, stage.path.length / 1.2);
     stage.path.growRate = rate;
     const pts = path.map((id) => stage.keyTop(id));
     let acc = 0;
     path.forEach((id, i) => {
         if (i > 0) acc += pts[i].distanceTo(pts[i - 1]);
         rewardTimers.push(setTimeout(() => {
-            stage.setKey(id, { dim: 0, glow: 0.85, legendGlow: 0.3, emissive: 0.25 });
+            // 梦里键帽不自己发光（泛光会把它糊成一团白），底光留着
+            stage.setKey(id, dreaming
+                ? { dim: 0.2, glow: 0.6, legendGlow: 0, emissive: 0, glowColor: stepColor(i, path.length) }
+                : { dim: 0, glow: 0.85, legendGlow: 0.3, emissive: 0.25, glowColor: stepColor(i, path.length) });
             stage.flare(id);
         }, reduceMotion ? 0 : (acc / rate) * 1000));
     });
     legend(path[0], { sub: "起" });
     legend(path[path.length - 1], { sub: "终" });
+    const drawn = reduceMotion ? 0 : (acc / rate) * 1000;
+    if (dreaming) startRewardDream(view);
+    // 画完：整条笔迹离开键盘浮起来，悬在上面；键帽退暗一点，等一会儿字母从它们上面冒出来
+    rewardTimers.push(setTimeout(() => {
+        if (currentScreen !== "reward") return;
+        stage.path.setLift(reduceMotion ? 0 : 0.8);
+        stage.path.pulse = 0.7;
+        path.forEach((id, i) => stage.setKey(id, { glow: dreaming ? 0.34 : 0.45, emissive: dreaming ? 0 : 0.1, glowColor: stepColor(i, path.length) }));
+        if (!reduceMotion) stage.ripple(path[0], { strength: 0.8, speed: 8, life: 1.6 });
+        // 离开键盘的那一下，整条线抖落一层星星
+        exhaleStars(path, { count: 5, speed: 0.9, life: [1.2, 2.4] });
+    }, drawn + 250));
+    rewardTimers.push(setTimeout(introDone, reduceMotion ? 0 : drawn + 650));
+    // 从音乐模式回来时句子已经在了：接着玩没放飞完的那几个字母
+    const poster = $("reward-message").querySelector(".poster");
+    if (poster) {
+        const token = rewardToken;
+        rewardIntro.then(() => {
+            if (currentScreen === "reward" && token === rewardToken) startLetterGame(poster, state.level);
+        });
+    }
+}
+
+// 过关页上一直在动的那部分梦：画线时笔尖撒星星；画完后整条线像萤火一样往外冒星点，镜头轻轻地漂。
+// 停手超过 25 秒就不再冒（星星熄完，画面停下，不白白耗电）；再按一下键又接着来
+function startRewardDream(view) {
+    let acc = 0;
+    let sway = 0;
+    dream.ambient = (dt) => {
+        if (currentScreen !== "reward") return false;
+        const tip = stage.path.tip();
+        if (tip) {
+            dream.emit(tip, { count: 2, speed: 0.6, spread: 2, life: [0.7, 1.5], size: [0.05, 0.14], buoy: 0.4, star: 0.3, colors: gradPalette(5) });
+            return true;
+        }
+        if (performance.now() - rewardTouchedAt > 25000) return false;
+        sway += dt;
+        stage.setView({ ...view, az: Math.sin(sway * 0.22) * 4, el: view.el + Math.sin(sway * 0.17) * 2.5, speed: 1.2 });
+        const done = !letterGame || letterGame.done;
+        const every = done ? 0.2 : 0.07;
+        acc += dt;
+        while (acc > every) {
+            acc -= every;
+            const u = Math.random();
+            dream.emit(stage.path.pointAt(u), {
+                count: 1, speed: 0.25, spread: 2, life: [2, 3.6], size: [0.05, 0.14], buoy: 0.2, drag: 1, star: 0.35,
+                colors: [stage.gradientColor(u), "#ffffff"],
+            });
+        }
+        return true;
+    };
+}
+
+// ---------- 拾字：句子里的首字母挂在各自的键上方，按一下放飞一个 ----------
+let letterGame = null;
+const lanternLayer = $("lantern-layer");
+const letterHintEl = $("letter-hint");
+
+function stopLetterGame() {
+    const G = letterGame;
+    if (!G) return;
+    cancelAnimationFrame(G.raf);
+    clearInterval(G.idle);
+    G.lanterns.forEach((el) => el.remove());
+    G.lanterns.clear();
+    letterGame = null;
+    letterHintEl.hidden = true;
+}
+
+function startLetterGame(poster, level) {
+    if (letterGame && letterGame.poster === poster && !letterGame.done) return; // 已经在玩这一张了
+    stopLetterGame();
+    // 这句话早就拼完了（从音乐模式回来）：不再重放收尾
+    if (poster.classList.contains("complete")) {
+        $("btn-next").classList.add("ready");
+        return;
+    }
+    const words = [...poster.querySelectorAll(".pw")];
+    const pending = new Map(); // 键 → 还没放飞的那几个词（按句子里的先后）
+    words.forEach((w) => {
+        if (w.classList.contains("landed")) return;
+        const ch = w.dataset.letter;
+        if (!ch || !stage.keys.has(ch) || reduceMotion) {
+            w.classList.add("landed");
+            return;
+        }
+        if (!pending.has(ch)) pending.set(ch, []);
+        pending.get(ch).push(w);
+    });
+    const G = {
+        poster, level, words, pending,
+        lanterns: new Map(), flying: 0, landed: 0,
+        lastAt: performance.now(), raf: 0, idle: 0, done: false,
+    };
+    letterGame = G;
+    if (!pending.size) {
+        finishLetterGame();
+        return;
+    }
+    letterHintEl.hidden = false;
+    letterHintEl.classList.remove("nudge");
+    letterHintEl.querySelector(".lh-text").textContent = "敲下发光的键，把字母送回句子里";
+    stage.setInteractive((id) => id === "knob" || !!(letterGame && letterGame.pending.has(id)));
+    // 灯笼一盏一盏亮起来
+    [...pending.keys()].forEach((ch, i) => rewardTimers.push(setTimeout(() => addLantern(ch), 120 + i * 110)));
+    const track = () => {
+        G.raf = requestAnimationFrame(track);
+        G.lanterns.forEach((el, ch) => placeLantern(el, ch));
+    };
+    track();
+    // 停手太久：下一个该放飞的字母轻轻跳一跳
+    G.idle = setInterval(() => {
+        if (G.done || G.flying || performance.now() - G.lastAt < 5200) return;
+        const next = G.words.find((w) => !w.classList.contains("landed") && G.pending.has(w.dataset.letter));
+        if (!next) return;
+        const el = G.lanterns.get(next.dataset.letter);
+        if (el) el.classList.add("nudge");
+        stage.setKey(next.dataset.letter, { pulse: 1.4 });
+        letterHintEl.classList.add("nudge");
+        letterHintEl.querySelector(".lh-text").textContent = `试试按 ${next.dataset.letter.toUpperCase()}`;
+    }, 1300);
+}
+
+function wordColor(w) {
+    return w.style.getPropertyValue("--pw-c") || colorway.glow;
+}
+
+function addLantern(ch) {
+    const G = letterGame;
+    if (!G || G.done || !G.pending.has(ch) || G.lanterns.has(ch)) return;
+    const list = G.pending.get(ch);
+    const color = wordColor(list[0]);
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "lantern";
+    el.style.setProperty("--c", color);
+    el.setAttribute("aria-label", `放飞字母 ${ch.toUpperCase()}`);
+    el.innerHTML = `<span class="lt-in"><span class="lt-ch"></span><i class="lt-n"></i></span>`;
+    el.querySelector(".lt-ch").textContent = list[0].querySelector(".pw-i").textContent;
+    el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        launchLetter(ch);
+    });
+    lanternLayer.appendChild(el);
+    G.lanterns.set(ch, el);
+    updateLanternCount(ch);
+    placeLantern(el, ch);
+    stage.setKey(ch, { glow: dreaming ? 0.9 : 1.1, pulse: 0.55, glowColor: color, lift: 0.07, emissive: dreaming ? 0.06 : 0.35, dim: 0 });
+    stage.pop(ch);
+    // 每亮一盏，很轻地响一下（音阶往上走）
+    const snd = levelSoundFor(G.level);
+    audio.play(snd.patch, scaleFreqOf(snd, 7 + (G.lanterns.size % snd.scale.length)), { velocity: 0.16, length: 0.5, pan: panOf(ch) });
+}
+
+function updateLanternCount(ch) {
+    const G = letterGame;
+    const el = G && G.lanterns.get(ch);
+    if (!el) return;
+    const n = (G.pending.get(ch) || []).length;
+    el.querySelector(".lt-n").textContent = n > 1 ? `×${n}` : "";
+}
+
+// 灯笼挂在键帽正上方：镜头动、页面滚，每一帧跟着那颗键走
+function placeLantern(el, ch) {
+    const p = stage.screenOf(ch);
+    if (!p) return;
+    el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+}
+
+// 放飞 ch 上排在最前面的那个字母；没有可放的返回 false
+function launchLetter(ch) {
+    const G = letterGame;
+    if (!G || G.done) return false;
+    const list = G.pending.get(ch);
+    if (!list || !list.length) return false;
+    const w = list.shift();
+    const lantern = G.lanterns.get(ch);
+    let from = stage.screenOf(ch);
+    if (lantern) {
+        const r = lantern.querySelector(".lt-in").getBoundingClientRect();
+        from = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+    if (!list.length) {
+        G.pending.delete(ch);
+        if (lantern) {
+            G.lanterns.delete(ch);
+            lantern.classList.add("gone");
+            setTimeout(() => lantern.remove(), 400);
+        }
+        stage.setKey(ch, { glow: 0.5, pulse: 0, lift: 0, emissive: 0.1 });
+    } else {
+        updateLanternCount(ch);
+        if (lantern) lantern.classList.remove("nudge");
+    }
+    G.lastAt = performance.now();
+    rewardTouchedAt = G.lastAt;
+    letterHintEl.classList.remove("nudge");
+    letterHintEl.querySelector(".lh-text").textContent = G.pending.size ? "敲下发光的键，把字母送回句子里" : "……";
+    stage.pop(ch);
+    stage.flare(ch, wordColor(w));
+    stage.ripple(ch, { strength: 0.55, speed: 8, life: 1.1 });
+    if (dreaming) {
+        // 键里升起一道光，迸出一团星星——字母就是从这里飞出去的
+        const kp = stage.keyTop(ch, 0.02);
+        dream.emit(kp, { count: 18, speed: 2.2, spread: 0.8, life: [0.8, 1.7], size: [0.05, 0.18], buoy: 0.5, star: 0.45, colors: [wordColor(w), "#ffffff"] });
+        dream.pillar(kp, { color: wordColor(w), height: 3.2, width: 0.45, life: 1 });
+        dream.flash(0.25);
+    }
+    G.flying += 1;
+    flyLetter(w, from, () => {
+        G.flying -= 1;
+        landWord(w);
+    });
+    return true;
+}
+
+// 一个字母从 from 飞进句子里它自己的位置：沿一道弧线（二次贝塞尔）飞，身后拖着星尘，落下时迸一团星光
+function flyLetter(w, from, onLand) {
+    const init = w.querySelector(".pw-i");
+    if (!init || reduceMotion || !from) {
+        onLand();
+        return;
+    }
+    const tr = init.getBoundingClientRect();
+    const to = { x: tr.left + tr.width / 2, y: tr.top + tr.height / 2 };
+    const color = wordColor(w);
+    const fly = document.createElement("span");
+    fly.className = "fly-letter" + (w.classList.contains("hit") ? " hit" : "");
+    fly.style.setProperty("--pw-c", color);
+    fly.textContent = init.textContent;
+    fly.style.fontSize = getComputedStyle(init).fontSize;
+    $("fly-layer").appendChild(fly);
+    // 控制点：往上拱出一道弧，每个字母偏得不一样
+    const cx = (from.x + to.x) / 2 + (Math.random() - 0.5) * 180;
+    const cy = Math.min(from.y, to.y) - 90 - Math.random() * 80;
+    const spin = (Math.random() - 0.5) * 50;
+    const dur = 920;
+    const t0 = performance.now();
+    let done = false;
+    const land = (burst) => {
+        if (done) return;
+        done = true;
+        fly.remove();
+        if (burst) starBurst(to.x, to.y, { colors: [color, "#ffffff"], stars: 12, dust: 12, orbs: 1, speed: 3.6 });
+        onLand();
+    };
+    const step = (now) => {
+        if (done) return;
+        const k = Math.min(1, (now - t0) / dur);
+        const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+        const x = (1 - e) * (1 - e) * from.x + 2 * (1 - e) * e * cx + e * e * to.x;
+        const y = (1 - e) * (1 - e) * from.y + 2 * (1 - e) * e * cy + e * e * to.y;
+        const sc = 1.3 + 0.35 * Math.sin(Math.PI * e) - 0.3 * e;
+        fly.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%) scale(${sc.toFixed(3)}) rotate(${(spin * Math.sin(Math.PI * e)).toFixed(1)}deg)`;
+        starTrail(x, y, color);
+        if (k >= 1) land(true);
+        else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    // 页面在后台时 rAF 不跑：到点直接落下
+    setTimeout(() => land(false), dur + 500);
+}
+
+function landWord(w) {
+    const G = letterGame;
+    w.classList.add("landed");
+    if (!G || G.poster !== w.closest(".poster")) return;
+    G.landed += 1;
+    if (currentScreen === "reward") {
+        // 落定一个响一个：句子被你一个音一个音地"弹"出来，越往后越高
+        const snd = levelSoundFor(G.level);
+        const idx = G.words.indexOf(w);
+        audio.play(snd.patch, scaleFreqOf(snd, 4 + G.landed), {
+            velocity: 0.55, length: 0.9, pan: (idx / Math.max(1, G.words.length - 1) - 0.5) * 0.8,
+        });
+    }
+    if (!G.pending.size && !G.flying) finishLetterGame();
+}
+
+// 空格：剩下的字母按句子顺序一个接一个全放飞
+function releaseAllLetters() {
+    const G = letterGame;
+    if (!G || G.done) return;
+    const order = G.words.filter((w) => !w.classList.contains("landed") && G.pending.has(w.dataset.letter));
+    order.forEach((w, i) => rewardTimers.push(setTimeout(() => launchLetter(w.dataset.letter), i * 120)));
+}
+
+// 按了一个没有灯笼的键：轻轻荡一下，不算错
+function tapWithoutLetter(id) {
+    rewardTouchedAt = performance.now();
+    if (stage.keys.has(id)) {
+        stage.pop(id);
+        stage.ripple(id, { strength: 0.25, speed: 7, life: 0.7 });
+    }
+}
+
+// ④ 成句
+function finishLetterGame() {
+    const G = letterGame;
+    if (!G || G.done) return;
+    G.done = true;
+    cancelAnimationFrame(G.raf);
+    clearInterval(G.idle);
+    G.lanterns.forEach((el) => el.remove());
+    G.lanterns.clear();
+    letterHintEl.hidden = true;
+    stage.setInteractive((id) => id === "knob");
+    if (currentScreen !== "reward") return;
+    G.poster.classList.add("complete");
+    $("btn-next").classList.add("ready");
+    if (reduceMotion) return;
+    // 键盘上从左到右荡过一道波，线落回一半、继续流光
+    stage.ripple("`", { strength: 1.1, speed: 10, width: 1.7, life: 2.4 });
+    stage.path.setLift(0.35);
+    stage.path.pulse = 1;
+    // 收一个和弦：这一关的乐器从低到高扫上去
+    const snd = levelSoundFor(G.level);
+    [0, 2, 4, 7, 9, 11, 14].forEach((d, i) => {
+        audio.play(snd.patch, scaleFreqOf(snd, d), { when: 0.1 + i * 0.07, velocity: 0.62, length: 1.4, pan: (i / 6 - 0.5) * 0.9 });
+    });
+    const colors = gradPalette(6);
+    const r = G.poster.getBoundingClientRect();
+    if (r.width) {
+        // 句子上迸开一大团星光，左右再各开一朵
+        starBurst(r.left + r.width / 2, r.top + r.height * 0.4, { colors, stars: 44, dust: 40, orbs: 3, speed: 7.5 });
+        [0.2, 0.8].forEach((fx, i) => setTimeout(() => {
+            if (currentScreen === "reward") starBurst(r.left + r.width * fx, r.top + r.height * 0.3, { colors, stars: 16, dust: 14, orbs: 1, speed: 5 });
+        }, 180 + i * 170));
+    }
+    if (!dreaming) return;
+    // 整条线"呼"出一口星星，冲击波从中间荡开，两枚星光烟花
+    dream.flash(1.2);
+    exhaleStars(rewardPath);
+    const mid = rewardPath.length ? stage.keyTop(rewardPath[Math.floor(rewardPath.length / 2)], 0.02) : null;
+    dream.ring(mid, { colors: [colors[0], colors[5]], radius: 9, life: 2.4, width: 0.05 });
+    const W = window.innerWidth;
+    [0.25, 0.75].forEach((fx, i) => setTimeout(() => {
+        if (currentScreen === "reward") firework(W * fx, colors);
+    }, 350 + i * 300));
+    rewardTouchedAt = performance.now();
+    // 梦慢慢安静下来：光退到一半，星星冒得越来越少
+    rewardTimers.push(setTimeout(() => { if (dreaming) dream.setLevel(0.75, 0.22); }, 6000));
 }
 
 function goToNextLevel() {
     stopWordFlash(); // AI 还没返回就点了下一关时，别让闪词继续跑
+    stopLetterGame();
     if (state.level >= TOTAL_LEVELS) showFinal();
     else startLevel(state.level + 1);
 }
@@ -2444,12 +3191,16 @@ function showLoading(container, letterSequence) {
 
 function showAIResult(container, sentence, sequence, level = state.level) {
     stopWordFlash();
+    stopLetterGame();
     container.innerHTML = "";
     container.classList.add("has-words", "is-poster");
     const poster = renderPoster(sentence, sequence, level);
     container.appendChild(poster);
-    // 等版面排好、量得到每个首字母的位置了再起飞
-    requestAnimationFrame(() => requestAnimationFrame(() => flyInitials(poster, level)));
+    // 句子的样子先出来（首字母空着），等笔迹浮起来了，字母才挂到键盘上
+    const token = rewardToken;
+    rewardIntro.then(() => {
+        if (currentScreen === "reward" && token === rewardToken && poster.isConnected) startLetterGame(poster, level);
+    });
 }
 
 function showFallbackButton(container, sequence, errorMsg, run) {
@@ -2491,7 +3242,7 @@ function showFallbackButton(container, sequence, errorMsg, run) {
 // 终局：一座塔
 // 每一关的笔迹停在它自己那一层，位置就是当时在键盘上走过的那些键；
 // 上一层的终点用一道弧线接到下一层的起点——整条线从底层一路盘到顶，一次都没断。
-// 每一层画出来的时候，用那一关的乐器把它的旋律再弹一遍，十二件乐器轮一圈，最后落在钢琴上。
+// 每一层画出来的时候，用那一关的乐器把它的旋律再弹一遍，十四件乐器轮一圈，最后落在"星河"上。
 // ============================================================
 const captionEl = $("chain-caption");
 const finalHintEl = $("final-hint");
@@ -2544,7 +3295,7 @@ function setupFinal() {
     finalLevels = [...state.runs.entries()].sort((a, b) => a[0] - b[0]);
     if (!finalLevels.length) return;
     // 跳过的关卡：这一层是一道虚影
-    stage.buildTower(finalLevels.map(([lv, run]) => ({ ids: run.path, color: levelColorway(lv).glow, ghost: !!run.skipped })));
+    stage.buildTower(finalLevels.map(([lv, run]) => ({ ids: run.path, color: levelColorway(lv).glow, grad: levelColorway(lv).grad, ghost: !!run.skipped })));
     finalHintEl.classList.remove("on");
     captionEl.classList.remove("on", "flip");
     stage.setView(finalView(floorY(1)));
@@ -2577,7 +3328,7 @@ function setupFinal() {
             if (lit) lit.forEach((id) => stage.setKey(id, { glow: 0, glowColor: null, dim: 0.85 }));
             stage.setView(finalView(stage.towerTopY()));
             finaleChord();
-            launchCelebration(finalLevels.map(([lv]) => levelColorway(lv).glow));
+            launchCelebration(finalLevels.map(([lv]) => levelColorway(lv).glow), { rockets: 5 });
             stage.setOrbit(true, { auto: reduceMotion ? 0 : 6 });
             // 塔盖好了：每一层都有一颗光点顺着那一关的路慢慢走
             stage.setTowerFlow(true);
@@ -2749,46 +3500,6 @@ const SONGS = [
         name: "友谊地久天长",
         bpm: 96,
         score: "_5 | 1 - 1 1 | 3 - 2 1 | 2 - 3 - | 1 - - -",
-    },
-    {
-        // 五月天《后来的我们》，1=C 4/4 ♩=78，照谱子第一页记的（主歌 + 副歌）。
-        // 弧线分两种：同一个音连起来的是延音线 ~（只按一下、按住），不同的音是圆滑线 ( )。
-        name: "后来的我们",
-        bpm: 78,
-        tip: "弧线连着的同音只按一下、按住；高音在 K L ; 和上一排 R T Y",
-        score:
-            "0 0 0 0/ 3/ | (5 3/) 3/ ~ 3 0/. 2// | 3/ #5/ 5/ 6// 7// ~ 7/ 3/ 2/ 3/ | (2 1/) 1/ ~ 1 0/. 1// | " +
-            "2/ 3/ 4/ 5// #5// ~ #5/ 5/ 4/ 5/ | 3. ^1/ ~ ^1 0/. 3// | ^1/ 6/ 6/ 5// 6// ~ 6/ 4/ (3/ 2/) | 2 - 0 0/ 3/ | " +
-            "(5 3/) 3/ ~ 3 0/. 2// | 3/ #5/ 5/ 6// 7// ~ 7/ 3/ 2/ 3/ | (2 1/) 1/ ~ 1 0/. 1// | " +
-            "2/ 3/ 4/ 5// #5// ~ #5/ 5/ 4/ 5/ | 3. ^1/ ~ ^1 0/. 3// | ^3/ ^2/ ^1/ ^2// ^4// ~ ^4/ ^3/ ^2/ ^1// ~ ^1// | ^1 - - - | " +
-            "0 0/. 6// 6/ 7/ ^1/ ^2/ | (^1/ 6/) 6 ^1 ^3/. ^2// ~ | ^2 0/. 6// #5/ 6/ 7/ ^1/ | " +
-            "^2 5 ^2 ^4/ (^4/ ~ | ^4/ ^3/ ~ ^3/.) ^1// ^1/ ^2/ ^3/ ^4/ | 6 0/. ^1// ^1/ ^2/ ^3/ ^4/ | " +
-            "^2 0/. ^1// ^1/ 5/ ^3/ ^3/ ~ | ^3 - - 0/ ^4// ^3// | ^2 0/ 7/ ^1 ^2 | " +
-            "^6/ ^5/ ^3/ ^3/ ~ ^3/ ^3/ ^1/ ^2/ ~ | ^2 - 0/ 7/ ^1/ ^2/ | ^5/ ^4/ ^3/ ^2/ ~ ^2/ ^2/ 7/. ^1// ~ | ^1 - 0/ ^1/ 7/ ^1/ | " +
-            "^5/ ^4/ ^3/ ^4// ^3// ~ ^3/ ^1 0// ^1// | ^5/ ^4/ ^3/ ^4// (^3// ^1/) ^1 0// ^5// | " +
-            "^6/ ^5/ ^2/ ^1// ^2// ~ ^2/ ^5/ (^3/ ^2/) | ^2. 7/ ^1 ^2 | " +
-            "^6/ ^5/ ^3/ ^3/ ~ ^3/ ^3/ (^5/ ^2/) | ^2 - 0/ 7/ ^1/ ^2/ | ^5/ ^4/ ^3/ ^2/ ~ ^2/ ^2/ 7/ ^1/ ~ | ^1 - 0/ ^1/ 7/ ^1/ | " +
-            "^5/ ^4/ ^3/ ^4// ^3// ~ ^3/ ^1 ^1/ | ^5/ ^4/ ^4/ ^3/ ^3 - ~ | ^3 - - 0/ ^4// ^3//",
-    },
-    {
-        // 五月天《步步》，1=C 4/4 ♩=70，主歌 + 副歌（谱子第一页，第二段主歌旋律相同就不重复记了）。
-        // 主歌几乎都在最下面一排（Z 行）
-        name: "步步",
-        bpm: 70,
-        tip: "主歌在最下面一排 Z X C V B N M；弧线连着的同音按住别重按",
-        score:
-            "_3/ _3/ _3/ _3/ _3/ _4// _5// ~ _5 | _3/ _3/ _3/ _3/ _3/ _4// _5// ~ _5 | " +
-            "_3/ _3// _3// ~ _3/ _4// _5// ~ _5/ _1/ _6/ _6/ ~ | (_6/ _5.) 0 0 | " +
-            "_6/ _6/ _6/ _4/ 2/ 3// 2// ~ 2 | _5/ _5/ _5/ _3/ | 1/ 2// 2// ~ (2// 1/) 1// | " +
-            "1/ _#5// _#5// ~ _#5/. 1// 1/ _#5// _#5// ~ _#5/ _#5/ | (_5/ _#5// _5//) ~ _5 - 0 | " +
-            "_3/ _3/ _3/ _3/ _3/ _4// _5// ~ _5 | _3/ _3/ _3/ _3/ _3/ _4// _5// ~ _5 | " +
-            "_3/ _3// _3// ~ _3/ _4// _5// ~ _5/ _1/ _6/ _6/ ~ | (_6/ _5.) 0 0 | " +
-            "_6/ _6/ _6/ _4/ 2/ 3// 3// ~ 3// 2/. | #5/ 3/ 3/ 2/ 2// 3/ 1// ~ 1/. 1// | " +
-            "1/ _6// _6// ~ _6/. 1// 1/ _6// _6// ~ _6// _6// _7// 1// | 3/ 2/ 2/ 1// 2// ~ 2. _3/ | " +
-            "1/ 1// 1// ~ 1// _6/. 3/ 2// 1// ~ 1// 2/ _3// | _5/ _5// _5// ~ _5// _3/. 2/ 3// 2// ~ 2// 1/ 3// | " +
-            "4/ 3// 3// ~ 3// 2/ 1// 1/ _7// 1// ~ 1// 2/. | 3/ 2// 2// ~ 2/ 1// 1// ~ 1. 1/ | " +
-            "1/ 1// 1// ~ 1// _6/. 3/ 2// 1// ~ 1// 2/ _7// | #5/ 3/ 2// (3/ 2//) 2/ 3// 2// ~ 2// 1/ 3// | " +
-            "4/ 3/ 2/ 1/ _5/ 1/ _7/ 1/ ~ | 1 - - 0",
     },
 ];
 
@@ -3051,7 +3762,6 @@ let currentNotes = [];
 let currentEvents = [];
 let playTimers = [];
 let playVoices = new Set();
-let perfTimer = null;
 let followMode = false;
 let followPos = 0;
 
@@ -3290,7 +4000,7 @@ function setInstrument(id, { preview = false } = {}) {
 }
 
 // ---------- 曲库 ----------
-// 内置的 SONGS 只读，自编的 / 导入的存 localStorage，两边拼起来才是完整曲库
+// 内置的 SONGS 只读，自编的存 localStorage，两边拼起来才是完整曲库
 const CUSTOM_SONGS_KEY = "mss-custom-songs";
 
 function loadCustomSongs() {
@@ -3306,8 +4016,6 @@ function loadCustomSongs() {
                 octave: Number.isFinite(+s.octave) ? Math.max(-2, Math.min(2, +s.octave)) : 0,
                 bpm: Number.isFinite(+s.bpm) ? Math.min(240, Math.max(30, +s.bpm)) : 100,
                 score: s.score,
-                perf: Array.isArray(s.perf) ? s.perf : null,
-                source: s.source || "",
                 custom: true,
             }));
     } catch (err) {
@@ -3318,9 +4026,7 @@ function loadCustomSongs() {
 let customSongs = loadCustomSongs();
 
 function persistCustomSongs() {
-    // 导入的 MIDI 可能带几千个演奏音符，存不下就先丢掉演奏数据再试一次
-    if (store.set(CUSTOM_SONGS_KEY, JSON.stringify(customSongs))) return true;
-    return store.set(CUSTOM_SONGS_KEY, JSON.stringify(customSongs.map((s) => ({ ...s, perf: null }))));
+    return store.set(CUSTOM_SONGS_KEY, JSON.stringify(customSongs));
 }
 
 const allSongs = () => SONGS.concat(customSongs);
@@ -3333,7 +4039,7 @@ function renderSongList() {
         b.className = "song-chip";
         b.classList.toggle("on", currentSong === song);
         b.classList.toggle("is-custom", !!song.custom);
-        const tag = song.source ? song.source : song.custom ? "自编" : keyName(song.key || 0);
+        const tag = song.custom ? "自编" : keyName(song.key || 0);
         b.innerHTML =
             `<span class="song-name">${escapeText(song.name)}</span>` +
             `<span class="song-tag">${escapeText(tag)}</span>`;
@@ -3516,9 +4222,6 @@ function saveDraft() {
         octave: old ? old.octave || 0 : musicOctave,
         bpm: Math.min(240, Math.max(30, parseInt(edBpmEl.value, 10) || 100)),
         score,
-        // 谱子改过了，导入时带的那份演奏数据就对不上了，丢掉
-        perf: old && old.score === score ? old.perf : null,
-        source: old && old.score === score ? old.source : "",
         custom: true,
     };
     // 同名就覆盖，不然改一次存一次会堆一串同名曲目
@@ -3614,6 +4317,10 @@ function litMusicKey(id, ms, alter) {
     if (!id || !stage.keys.has(id)) return;
     stage.press(id, true);
     stage.flare(id);
+    if (abyssOn) {
+        abyss.noteOn(id, { velocity: 0.75, freq: musicFreqOf(musicIndexOf(id), alter) });
+        setTimeout(() => abyss.noteOff(id), ms || 240);
+    }
     if (alter) keyMark[id] = alter > 0 ? "#" : "b";
     else delete keyMark[id];
     updateMusicLegend(id);
@@ -3629,8 +4336,6 @@ function litMusicKey(id, ms, alter) {
 function stopPlayback() {
     playTimers.forEach(clearTimeout);
     playTimers = [];
-    clearInterval(perfTimer);
-    perfTimer = null;
     playVoices.forEach((v) => v.release());
     playVoices.clear();
     Object.keys(litTimers).forEach((id) => {
@@ -3642,6 +4347,9 @@ function stopPlayback() {
     });
     scorePlayBtn.textContent = "▶ 试听";
     scorePlayBtn.classList.remove("on");
+    const demo = $("btn-abyss-play");
+    demo.classList.remove("on");
+    demo.textContent = "▶ 演示";
 }
 
 // 编辑器开着时听的是草稿，速度得取输入框里的值，不是已保存曲目的
@@ -3657,101 +4365,53 @@ function playSong() {
     if (!currentNotes.length) return;
     stopPlayback();
     setFollow(false);
-    audio.ensure();
+    const ctx = audio.ensure();
+    if (!ctx) return;
     scorePlayBtn.textContent = "■ 停下";
     scorePlayBtn.classList.add("on");
-    const beat = 60000 / currentBpm();
+    const beat = 60 / currentBpm();
+    // 按音频时钟排（不靠 setTimeout 掐点），快歌也不会一顿一顿的
+    const t0 = ctx.currentTime + 0.15;
+    const at = (beats) => t0 + beats * beat;
+    // 画面（亮键、谱面进度）等声音真的从耳机里出来再动：蓝牙耳机要晚 0.1–0.3 秒
+    const lag = visualLag();
+    const delayMs = (time) => Math.max(0, (time - ctx.currentTime + lag) * 1000);
     // 谱面上的进度：每个音（包括延音线后面那一半）到点就亮
     let t = 0;
     currentNotes.forEach((n, i) => {
-        playTimers.push(setTimeout(() => markScoreAt(i), t * beat));
+        const start = t;
+        playTimers.push(setTimeout(() => markScoreAt(i), delayMs(at(start))));
         t += n.beats;
     });
     const total = t;
-    const song = currentSong;
-    // 导入的 MIDI / MusicXML 带着完整的演奏（和弦、伴奏）：大调时直接按原样多声部演奏
-    const usePerf = !editorOpen && song && song.perf && song.perf.length && musicMode() === MAJOR;
-    if (usePerf) {
-        playPerf(song);
-    } else {
-        currentEvents.forEach((e) => {
-            playTimers.push(setTimeout(() => {
-                const dur = e.beats * beat;
-                const v = audio.play(musicPatch, musicFreqOf(e.idx, e.alter), {
-                    hold: true, pan: e.key ? panOf(e.key) : 0, velocity: e.legato ? 0.92 : 1,
-                });
-                if (v) playVoices.add(v);
-                // 圆滑线里：一直响到下一个音进来（再多 30ms 叠一点），听起来是连着的；
-                // 普通音：留一点断口，连着的同音之间才听得出是两下
-                const offMs = e.legato ? dur + 30 : Math.max(60, dur * 0.88);
-                litMusicKey(e.key, Math.max(140, offMs), e.alter);
-                playTimers.push(setTimeout(() => {
-                    if (v) {
-                        v.release();
-                        playVoices.delete(v);
-                    }
-                }, offMs));
-            }, e.start * beat));
-        });
-    }
-    playTimers.push(setTimeout(() => {
-        stopPlayback();
-        markScoreAt(-1);
-    }, total * beat + 600));
-}
-
-// 多声部演奏：按音频时钟往前排 0.5 秒，每 150ms 补一次；同时响的音太多就跳过最里面的几个
-function playPerf(song) {
-    const ctx = audio.ensure();
-    if (!ctx) return;
-    const shift = musicKey - (song.key || 0) + 12 * (musicOctave - (song.octave || 0));
-    const rate = currentBpm() / (song.bpm || 100);
-    const t0 = ctx.currentTime + 0.1;
-    const ev = song.perf;
-    const ends = [];
-    let i = 0;
+    // 往前排 0.25 秒，每 40ms 补一批
+    let k = 0;
     const tick = () => {
-        const now = ctx.currentTime;
-        const horizon = now + 0.5;
-        while (i < ev.length && t0 + ev[i][0] / rate < horizon) {
-            const [t, d, midi, vel] = ev[i];
-            i++;
-            const start = t0 + t / rate;
-            const end = t0 + (t + d) / rate;
-            // 清掉已经结束的，数一数同一时刻还在响的
-            for (let k = ends.length - 1; k >= 0; k--) if (ends[k] <= start) ends.splice(k, 1);
-            if (ends.length >= 14) continue;
-            ends.push(end);
-            const f = 440 * Math.pow(2, (midi + shift - 69) / 12);
-            const v = audio.play(musicPatch, f, {
-                when: start - now, hold: true, velocity: 0.45 + vel * 0.55, pan: Math.max(-0.6, Math.min(0.6, (midi - 62) / 30)),
+        const horizon = ctx.currentTime + 0.25;
+        while (k < currentEvents.length && at(currentEvents[k].start) < horizon) {
+            const e = currentEvents[k++];
+            const start = at(e.start);
+            const dur = e.beats * beat;
+            // 圆滑线里：一直响到下一个音进来（再多 30ms 叠一点），听起来是连着的；
+            // 普通音：留一点断口，连着的同音之间才听得出是两下
+            const off = e.legato ? dur + 0.03 : Math.max(0.06, dur * 0.88);
+            const v = audio.play(musicPatch, musicFreqOf(e.idx, e.alter), {
+                when: start - ctx.currentTime, hold: true, pan: e.key ? panOf(e.key) : 0, velocity: e.legato ? 0.92 : 1,
             });
             if (v) {
-                v.release(Math.max(start + 0.05, end));
-                // 有对得上的键就顺手按一下
-                const id = keyForMidi(midi + shift);
-                if (id) playTimers.push(setTimeout(() => stage.flare(id), Math.max(0, (start - now) * 1000)));
+                playVoices.add(v);
+                v.release(start + off);
+                playTimers.push(setTimeout(() => playVoices.delete(v), delayMs(start + off) + 100));
             }
-        }
-        if (i >= ev.length) {
-            clearInterval(perfTimer);
-            perfTimer = null;
+            playTimers.push(setTimeout(() => litMusicKey(e.key, Math.max(140, off * 1000), e.alter), delayMs(start)));
         }
     };
     tick();
-    perfTimer = setInterval(tick, 150);
-}
-
-// 一个绝对音高落在当前调的哪个键上（落在黑键上就找最近的白键）
-function keyForMidi(midi) {
-    const doMidi = 48 + musicKey + 12 * musicOctave; // Z 那一排的 1
-    const rel = midi - doMidi;
-    const mode = musicMode();
-    const oct = Math.floor(rel / 12);
-    const pc = ((rel % 12) + 12) % 12;
-    let best = 0;
-    mode.forEach((s, i) => { if (Math.abs(s - pc) < Math.abs(mode[best] - pc)) best = i; });
-    return musicKeyOf(oct * 7 + best);
+    playTimers.push(setInterval(tick, 40)); // clearTimeout 也能清掉 setInterval
+    playTimers.push(setTimeout(() => {
+        stopPlayback();
+        markScoreAt(-1);
+    }, delayMs(at(total)) + 600));
 }
 
 // ---------- 跟弹：下一个该敲的键上方悬着光环，敲对了才往前走 ----------
@@ -3821,7 +4481,14 @@ const musicPlayer = makeHoldPlayer({
         const idx = musicIndexOf(id);
         // 按下那一刻的升降跟着这个音走到松手，中途放开 Shift 不改已经在响的音
         musicKeyAlter[id] = musicAlter;
-        return audio.play(musicPatch, musicFreqOf(idx, musicAlter), { hold: true, pan: panOf(id) });
+        const f = musicFreqOf(idx, musicAlter);
+        // 先发声、再做画面：声音越早排进音频线程越跟手
+        const voice = audio.play(musicPatch, f, { hold: true, pan: panOf(id) });
+        if (abyssOn) {
+            abyss.noteOn(id, { velocity: 0.95, freq: f });
+            audio.bubbles({ pan: panOf(id) });
+        }
+        return voice;
     },
     onHold: (id, on) => {
         stage.press(id, on);
@@ -3829,8 +4496,10 @@ const musicPlayer = makeHoldPlayer({
             stage.flare(id);
             stage.ripple(id, { strength: 0.55, speed: 9, life: 0.9 });
             advanceFollow(id, musicKeyAlter[id] || 0);
+            if (abyssOn) hideAbyssHint();
         } else {
             delete musicKeyAlter[id];
+            if (abyssOn) abyss.noteOff(id);
         }
     },
     // 手松了但踏板挂着、还在响：和"手按着"要能分开看
@@ -3845,7 +4514,8 @@ function musicPointerDown(id, holder) {
     }
     stage.pop(id);
     if (id === "esc") {
-        exitMusicMode();
+        if (abyssOn) exitAbyss();
+        else exitMusicMode();
     } else if (/^f\d+$/.test(id)) {
         setInstrument(INSTRUMENT_BANKS[musicBank][Number(id.slice(1)) - 1], { preview: true });
     } else if (id === "caps") {
@@ -3867,6 +4537,110 @@ function musicPointerDown(id, holder) {
     }
 }
 
+// ============================================================
+// 深海模式（音乐模式里的一个沉浸视图）：键盘沉进发光的水箱，弹钢琴时从键里升起气泡、烟雾和光柱。
+// 画面由 js/abyss.js 负责；这里管进出、镜头、声音和那一条控制栏
+// ============================================================
+const abyss = stage ? new Abyss(stage) : null;
+let abyssOn = false;
+let abyssSaved = null;
+let abyssCam = null;
+let abyssHintTimer = null;
+
+// 镜头：隔着水箱的前壁平视，轻轻地来回漂（像手持摄影机在水族馆外面拍）
+function abyssView(t = 0) {
+    // 竖屏：整只水箱塞进来键盘就太小了，左右裁掉一些
+    const tall = window.innerWidth < window.innerHeight * 0.9;
+    return {
+        region: tall
+            ? { x0: 1.2, x1: 14.8, z0: ABYSS_TANK.z0 + 1, z1: ABYSS_TANK.z1 }
+            : { x0: ABYSS_TANK.x0 + 0.9, x1: ABYSS_TANK.x1 - 0.9, z0: ABYSS_TANK.z0 + 1, z1: ABYSS_TANK.z1 },
+        yLo: ABYSS_TANK.y0, yHi: ABYSS_TANK.y1, targetY: 3.1,
+        az: Math.sin(t * 0.07) * 5, el: 4.5 + Math.sin(t * 0.05 + 1) * 1.2, fov: 30, margin: 0, speed: 0.8,
+    };
+}
+
+function hideAbyssHint() {
+    clearTimeout(abyssHintTimer);
+    abyssHintTimer = setTimeout(() => $("abyss-hint").classList.add("gone"), 2500);
+}
+
+function enterAbyss() {
+    if (!abyss || abyssOn) return;
+    if (currentScreen !== "music") enterMusicMode();
+    const go = () => {
+        abyssOn = true;
+        stopPlayback();
+        setFollow(false);
+        closePanels();
+        abyssSaved = { patch: musicPatch };
+        document.body.classList.add("abyss");
+        $("abyss-hud").hidden = false;
+        $("abyss-hint").classList.remove("gone");
+        // 提示词里是钢琴：进来先换成钢琴，F 键照样能换
+        if (musicPatch !== "piano") setInstrument("piano");
+        applyColorway(COLORWAYS.abyss);
+        abyss.enter();
+        stage.setInteractive((id) => !!CELL[id] || id === "esc" || id === "tab");
+        const t0 = stage.time;
+        stage.setView(abyssView(0), { instant: false });
+        abyssCam = stage.onTick(() => stage.setView(abyssView(stage.time - t0)));
+        // 声音：大教堂一样的混响、回声、长尾，环境声换成深海的轰鸣和远处的气泡
+        audio.setFx({ reverb: "cathedral", echo: 0.5, bloom: 0.8, width: 1.5, tone: "clear", cinematic: false });
+        audio.setAmbience("abyss", 0.95);
+        $("abyss-inst").textContent = INSTRUMENTS[musicPatch].name;
+        const sel = $("abyss-song");
+        sel.innerHTML = allSongs().map((s, i) => `<option value="${i}">${escapeText(s.name)}</option>`).join("");
+        const pick = allSongs().findIndex((s) => s.name === "天空之城");
+        if (pick >= 0) sel.value = String(pick);
+    };
+    if (document.startViewTransition && !reduceMotion) document.startViewTransition(go);
+    else go();
+}
+
+// 拆掉深海（不带过渡）：换屏时用
+function teardownAbyss() {
+    if (!abyssOn) return;
+    abyssOn = false;
+    if (abyssCam) abyssCam();
+    abyssCam = null;
+    clearTimeout(abyssHintTimer);
+    abyss.exit();
+    document.body.classList.remove("abyss");
+    $("abyss-hud").hidden = true;
+    $("btn-abyss-play").classList.remove("on");
+    if (abyssSaved && abyssSaved.patch !== musicPatch) setInstrument(abyssSaved.patch);
+    applyStyle({ persist: false }); // 效果、环境声、配色都回到风格面板里的设置
+}
+
+function exitAbyss() {
+    if (!abyssOn) return;
+    const go = () => {
+        stopPlayback();
+        teardownAbyss();
+        if (currentScreen === "music") setupMusic();
+    };
+    if (document.startViewTransition && !reduceMotion) document.startViewTransition(go);
+    else go();
+}
+
+function playAbyssDemo() {
+    const btn = $("btn-abyss-play");
+    if (playTimers.length) {
+        stopPlayback();
+        btn.classList.remove("on");
+        btn.textContent = "▶ 演示";
+        return;
+    }
+    const song = allSongs()[Number($("abyss-song").value)];
+    if (!song) return;
+    selectSong(song);
+    playSong();
+    hideAbyssHint();
+    btn.classList.add("on");
+    btn.textContent = "■ 停下";
+}
+
 function enterMusicMode() {
     closePanels();
     if (currentScreen === "music") return;
@@ -3880,678 +4654,8 @@ function exitMusicMode() {
     if (currentScreen !== "music") return;
     stopPlayback();
     setFollow(false);
-    stopListening();
     releaseAllHeld(); // 按着键点了返回，别把音带出去
     showScreen(musicReturnTo);
-}
-
-// ============================================================
-// 导入乐谱：简谱文本 / MIDI / MusicXML → 曲库里的一首新歌，导进来直接开始演奏
-// ============================================================
-const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
-const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
-
-// 猜调（Krumhansl–Schmuckler）：返回大调主音的音级（小调就取它的关系大调——简谱照样用 1 2 3 写）
-function estimateTonic(notes) {
-    const hist = new Array(12).fill(0);
-    notes.forEach((n) => { hist[((n.midi % 12) + 12) % 12] += n.dur || 1; });
-    const corr = (profile, rot) => {
-        let sx = 0, sy = 0, sxy = 0, sxx = 0, syy = 0;
-        for (let i = 0; i < 12; i++) {
-            const x = hist[(i + rot) % 12];
-            const y = profile[i];
-            sx += x; sy += y; sxy += x * y; sxx += x * x; syy += y * y;
-        }
-        const n = 12;
-        return (n * sxy - sx * sy) / Math.sqrt(Math.max(1e-9, (n * sxx - sx * sx) * (n * syy - sy * sy)));
-    };
-    let best = { r: -2, pc: 0 };
-    for (let rot = 0; rot < 12; rot++) {
-        const maj = corr(MAJOR_PROFILE, rot);
-        if (maj > best.r) best = { r: maj, pc: rot };
-        const min = corr(MINOR_PROFILE, rot);
-        if (min > best.r) best = { r: min, pc: (rot + 3) % 12 };
-    }
-    return best.pc;
-}
-
-// 一段单声部旋律（节拍为单位）→ 我们的简谱。
-// melody: [{ start, beats, midi }]；tonicPc：主音音级
-const PC_TO_DEGREE = ["1", "#1", "2", "b3", "3", "4", "#4", "5", "#5", "6", "b7", "7"];
-
-function durTokens(q, note) {
-    // q：以十六分音符为单位的时值
-    const base = { 1: "//", 2: "/", 3: "/.", 4: "", 6: "." };
-    if (base[q] != null) return [note + base[q]];
-    if (q % 4 === 0) return [note, ...new Array(q / 4 - 1).fill("-")];
-    const whole = Math.floor(q / 4) * 4;
-    const rest = q - whole;
-    const head = whole ? [note, ...new Array(whole / 4 - 1).fill("-")] : [];
-    const tail = rest === 3 ? [note + "/."] : rest === 2 ? [note + "/"] : [note + "//"];
-    if (!head.length) return tail;
-    // 休止符不用延音线，直接接着写
-    return note === "0" ? [...head, ...tail] : [...head, "~", ...tail];
-}
-
-function melodyToSong({ name, melody, bpm, tonicPc, beatsPerBar = 4, perf = null, source = "" }) {
-    if (!melody.length) throw new Error("没找到能弹的旋律");
-    const pc = tonicPc != null ? tonicPc : estimateTonic(melody.map((n) => ({ midi: n.midi, dur: n.beats })));
-    const key = pc > 6 ? pc - 12 : pc; // -5 … +6，离 C 最近的写法
-    // 把"1"放在让旋律大致落在中央那一排的八度上
-    const sorted = melody.map((n) => n.midi).sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    const octave = Math.max(-2, Math.min(2, Math.round((median - (60 + key + 5)) / 12)));
-    const doMidi = 60 + key + 12 * octave;
-    const toks = [];
-    let pos = 0; // 以十六分为单位
-    let barAt = beatsPerBar * 4;
-    const pushBars = () => {
-        while (pos >= barAt) {
-            toks.push("|");
-            barAt += beatsPerBar * 4;
-        }
-    };
-    melody.slice(0, 480).forEach((n) => {
-        const start = Math.round(n.start * 4);
-        if (start > pos) {
-            toks.push(...durTokens(Math.min(start - pos, 64), "0"));
-            pos = start;
-            pushBars();
-        }
-        const q = Math.max(1, Math.round(n.beats * 4));
-        const rel = n.midi - doMidi;
-        const oct = Math.floor(rel / 12);
-        const deg = PC_TO_DEGREE[((rel % 12) + 12) % 12];
-        const marks = oct > 0 ? "^".repeat(Math.min(3, oct)) : oct < 0 ? "_".repeat(Math.min(2, -oct)) : "";
-        // 升降号写在八度记号后面：^#5
-        toks.push(...durTokens(q, marks + deg));
-        pos += q;
-        pushBars();
-    });
-    return {
-        name: name.slice(0, 24) || "导入的曲子",
-        key: Math.max(KEY_MIN, Math.min(KEY_MAX, key)),
-        octave,
-        bpm: Math.round(Math.min(240, Math.max(30, bpm || 100))),
-        score: toks.join(" ").replace(/\|\s*$/, "").trim(),
-        perf,
-        source,
-        custom: true,
-    };
-}
-
-// 简谱文本：可以带几行头信息（# 曲名、1=D、♩=90 / bpm=90），其余就是谱子
-function parseJianpuText(text, fileName) {
-    let name = fileName;
-    let key = 0;
-    let bpm = 100;
-    const body = [];
-    text.split(/\r?\n/).forEach((line) => {
-        const l = line.trim();
-        if (!l) return;
-        let m;
-        if ((m = /^(?:#|title\s*[:：]|曲名\s*[:：])\s*(.+)$/i.exec(l))) name = m[1].trim();
-        else if ((m = /^1\s*=\s*([#♯b♭]?)\s*([A-G])/i.exec(l))) {
-            const base = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[m[2].toUpperCase()];
-            const acc = /[#♯]/.test(m[1]) ? 1 : /[b♭]/.test(m[1]) ? -1 : 0;
-            const pc = (base + acc + 12) % 12;
-            key = pc > 6 ? pc - 12 : pc;
-            // 同一行后面可能还跟着速度
-            const b = /(?:♩|bpm)\s*[=:：]?\s*(\d{2,3})/i.exec(l);
-            if (b) bpm = +b[1];
-        } else if ((m = /^(?:♩|bpm|速度)\s*[=:：]?\s*(\d{2,3})/i.exec(l))) bpm = +m[1];
-        else body.push(l);
-    });
-    const score = body.join(" | ").replace(/\|\s*\|/g, "|").replace(/\s+/g, " ").trim();
-    if (!checkScore(score).count) throw new Error("文本里没找到简谱音符");
-    return { name: name.slice(0, 24), key, octave: 0, bpm: Math.min(240, Math.max(30, bpm)), score, perf: null, source: "文本", custom: true };
-}
-
-// MIDI：读出所有音符 + 速度表；最高、最密的那一轨当旋律，全部（去掉鼓）留作多声部演奏
-function parseMidi(buf, fileName) {
-    const dv = new DataView(buf);
-    let p = 0;
-    const str = (n) => { let s = ""; for (let i = 0; i < n; i++) s += String.fromCharCode(dv.getUint8(p + i)); p += n; return s; };
-    const u32 = () => { const v = dv.getUint32(p); p += 4; return v; };
-    const u16 = () => { const v = dv.getUint16(p); p += 2; return v; };
-    if (str(4) !== "MThd") throw new Error("这不是 MIDI 文件");
-    const hlen = u32();
-    u16(); // format
-    const ntrks = u16();
-    let division = u16();
-    p = 8 + hlen;
-    if (division & 0x8000) division = 480; // SMPTE 时间码的文件很少见，按 480 处理
-    const notes = [];
-    const tempos = [{ tick: 0, us: 500000 }];
-    let keySig = null;
-    let beatsPerBar = 4;
-    for (let t = 0; t < ntrks && p + 8 <= dv.byteLength; t++) {
-        const id = str(4);
-        const len = u32();
-        const end = Math.min(dv.byteLength, p + len);
-        if (id !== "MTrk") { p = end; continue; }
-        let tick = 0;
-        let run = 0;
-        const open = new Map();
-        const vlq = () => { let v = 0; for (let i = 0; i < 4 && p < end; i++) { const b = dv.getUint8(p++); v = (v << 7) | (b & 0x7f); if (!(b & 0x80)) break; } return v; };
-        while (p < end) {
-            tick += vlq();
-            if (p >= end) break;
-            let status = dv.getUint8(p);
-            if (status & 0x80) p++;
-            else status = run; // 延续上一条的状态字节
-            if (status === 0xff) {
-                const mt = dv.getUint8(p++);
-                const ml = vlq();
-                if (mt === 0x51 && ml === 3) tempos.push({ tick, us: (dv.getUint8(p) << 16) | (dv.getUint8(p + 1) << 8) | dv.getUint8(p + 2) });
-                else if (mt === 0x59 && ml >= 2 && !keySig) keySig = { sf: dv.getInt8(p), minor: dv.getUint8(p + 1) === 1 };
-                else if (mt === 0x58 && ml >= 2) beatsPerBar = Math.max(1, dv.getUint8(p) * 4 / Math.pow(2, dv.getUint8(p + 1)));
-                p += ml;
-                continue;
-            }
-            if (status === 0xf0 || status === 0xf7) {
-                p += vlq();
-                continue;
-            }
-            run = status;
-            const type = status & 0xf0;
-            const ch = status & 0x0f;
-            if (type === 0x90 || type === 0x80) {
-                const key = dv.getUint8(p++);
-                const vel = dv.getUint8(p++);
-                const k = ch * 128 + key;
-                if (type === 0x90 && vel > 0) {
-                    if (!open.has(k)) open.set(k, []);
-                    open.get(k).push({ tick, vel });
-                } else {
-                    const st = open.get(k);
-                    if (st && st.length) {
-                        const on = st.shift();
-                        if (tick > on.tick) notes.push({ start: on.tick, end: tick, midi: key, vel: on.vel / 127, ch, track: t });
-                    }
-                }
-            } else if (type === 0xa0 || type === 0xb0 || type === 0xe0) p += 2;
-            else if (type === 0xc0 || type === 0xd0) p += 1;
-            else p += 1;
-        }
-        p = end;
-    }
-    const pitched = notes.filter((n) => n.ch !== 9); // 10 通道是鼓
-    if (!pitched.length) throw new Error("文件里没有音符");
-    // 节拍 → 秒：按速度表一段一段累加
-    tempos.sort((a, b) => a.tick - b.tick);
-    const secOf = (tick) => {
-        let s = 0;
-        for (let i = 0; i < tempos.length; i++) {
-            const a = tempos[i];
-            if (a.tick >= tick) break;
-            const segEnd = i + 1 < tempos.length ? Math.min(tick, tempos[i + 1].tick) : tick;
-            if (segEnd > a.tick) s += ((segEnd - a.tick) / division) * (a.us / 1e6);
-        }
-        return s;
-    };
-    // 旋律：音符够多的那几轨里，平均音高最高的一轨；再取"天际线"——同一时刻只留最高的音
-    const groups = new Map();
-    pitched.forEach((n) => {
-        const g = n.track * 16 + n.ch;
-        if (!groups.has(g)) groups.set(g, []);
-        groups.get(g).push(n);
-    });
-    const maxCount = Math.max(...[...groups.values()].map((g) => g.length));
-    let melodyNotes = null;
-    let bestMean = -1;
-    groups.forEach((g) => {
-        if (g.length < Math.max(6, maxCount * 0.25)) return;
-        const mean = g.reduce((s, n) => s + n.midi, 0) / g.length;
-        if (mean > bestMean) { bestMean = mean; melodyNotes = g; }
-    });
-    const line = skyline((melodyNotes || pitched).map((n) => ({ start: n.start / division, beats: (n.end - n.start) / division, midi: n.midi })));
-    const atZero = tempos.filter((x) => x.tick === 0);
-    const bpm = 60e6 / atZero[atZero.length - 1].us;
-    const tonicPc = keySig ? (((keySig.sf * 7) % 12) + 12) % 12 : null;
-    const perf = pitched
-        .sort((a, b) => a.start - b.start)
-        .slice(0, 4000)
-        .map((n) => {
-            const s = secOf(n.start);
-            return [Math.round(s * 1000) / 1000, Math.round((secOf(n.end) - s) * 1000) / 1000, n.midi, Math.round(n.vel * 100) / 100];
-        });
-    return melodyToSong({ name: fileName, melody: line, bpm, tonicPc, beatsPerBar, perf, source: "MIDI" });
-}
-
-// 同一时刻只留最高的那个音：后来的更高的音会截断前面的
-function skyline(list) {
-    const sorted = list.slice().sort((a, b) => a.start - b.start || b.midi - a.midi);
-    const out = [];
-    sorted.forEach((n) => {
-        const prev = out[out.length - 1];
-        if (!prev || n.start >= prev.start + prev.beats - 1e-6) {
-            out.push({ ...n });
-            return;
-        }
-        if (n.start - prev.start < 1e-6) {
-            if (n.midi > prev.midi) out[out.length - 1] = { ...n };
-            return;
-        }
-        if (n.midi > prev.midi) {
-            prev.beats = n.start - prev.start;
-            out.push({ ...n });
-        }
-    });
-    return out.filter((n) => n.beats > 0.05);
-}
-
-// MusicXML（未压缩的 .musicxml / .xml）：第一个声部的第一声部当旋律，所有音符留作演奏
-function parseMusicXML(text, fileName) {
-    const doc = new DOMParser().parseFromString(text, "application/xml");
-    if (doc.querySelector("parsererror")) throw new Error("MusicXML 文件读不懂（.mxl 压缩包请先另存为 .musicxml）");
-    const titleEl = doc.querySelector("work-title") || doc.querySelector("movement-title");
-    const part = doc.querySelector("part");
-    if (!part) throw new Error("文件里没有声部");
-    const STEP = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-    let divisions = 1;
-    let fifths = null;
-    let bpm = null;
-    let beatsPerBar = 4;
-    let pos = 0;
-    let lastStart = 0;
-    const melody = [];
-    const all = [];
-    const text1 = (el, sel) => { const x = el.querySelector(sel); return x ? x.textContent.trim() : null; };
-    part.querySelectorAll(":scope > measure").forEach((m) => {
-        for (const el of m.children) {
-            const tag = el.tagName;
-            if (tag === "attributes") {
-                const d = text1(el, "divisions");
-                if (d) divisions = +d || 1;
-                const f = text1(el, "key > fifths");
-                if (f != null && fifths == null) fifths = +f;
-                const b = text1(el, "time > beats");
-                const bt = text1(el, "time > beat-type");
-                if (b && bt) beatsPerBar = (+b * 4) / +bt;
-            } else if (tag === "direction" || tag === "sound") {
-                const snd = tag === "sound" ? el : el.querySelector("sound");
-                if (snd && snd.getAttribute("tempo") && bpm == null) bpm = +snd.getAttribute("tempo");
-                const pm = text1(el, "per-minute");
-                if (pm && bpm == null) bpm = +pm;
-            } else if (tag === "backup") {
-                pos -= +(text1(el, "duration") || 0);
-            } else if (tag === "forward") {
-                pos += +(text1(el, "duration") || 0);
-            } else if (tag === "note") {
-                if (el.querySelector("grace")) continue;
-                const dur = +(text1(el, "duration") || 0);
-                const isChord = !!el.querySelector("chord");
-                const start = isChord ? lastStart : pos;
-                const voice = text1(el, "voice") || "1";
-                if (!el.querySelector("rest")) {
-                    const step = text1(el, "pitch > step");
-                    const oct = +(text1(el, "pitch > octave") || 4);
-                    const alt = +(text1(el, "pitch > alter") || 0);
-                    const midi = (oct + 1) * 12 + (STEP[step] || 0) + alt;
-                    const ties = [...el.querySelectorAll("tie")].map((x) => x.getAttribute("type"));
-                    const n = { start: start / divisions, beats: dur / divisions, midi };
-                    // 延音线后半段：接到前一个同音上
-                    const merge = (list) => {
-                        if (ties.includes("stop")) {
-                            for (let k = list.length - 1; k >= 0 && k >= list.length - 8; k--) {
-                                const q = list[k];
-                                if (q.midi === midi && Math.abs(q.start + q.beats - n.start) < 1e-6) { q.beats += n.beats; return; }
-                            }
-                        }
-                        list.push({ ...n });
-                    };
-                    merge(all);
-                    if (voice === "1") {
-                        const prev = melody[melody.length - 1];
-                        if (isChord && prev && Math.abs(prev.start - n.start) < 1e-6) {
-                            if (midi > prev.midi) prev.midi = midi;
-                        } else if (!isChord) merge(melody);
-                    }
-                }
-                if (!isChord) {
-                    lastStart = pos;
-                    pos += dur;
-                }
-            }
-        }
-    });
-    if (!melody.length) throw new Error("没找到旋律音符");
-    const tempo = bpm || 100;
-    const perf = all
-        .sort((a, b) => a.start - b.start)
-        .slice(0, 4000)
-        .map((n) => [Math.round((n.start * 60 / tempo) * 1000) / 1000, Math.round((n.beats * 60 / tempo) * 1000) / 1000, n.midi, 0.8]);
-    const tonicPc = fifths != null ? (((fifths * 7) % 12) + 12) % 12 : null;
-    const name = (titleEl && titleEl.textContent.trim()) || fileName;
-    return melodyToSong({ name, melody, bpm: tempo, tonicPc, beatsPerBar, perf, source: "MusicXML" });
-}
-
-async function importScoreFile(file) {
-    if (!file) return;
-    const base = file.name.replace(/\.[^.]+$/, "");
-    const ext = (file.name.split(".").pop() || "").toLowerCase();
-    let song;
-    try {
-        if (ext === "mid" || ext === "midi") song = parseMidi(await file.arrayBuffer(), base);
-        else if (ext === "musicxml" || ext === "xml") song = parseMusicXML(await file.text(), base);
-        else if (ext === "mxl") throw new Error(".mxl 是压缩过的 MusicXML，请在打谱软件里另存为 .musicxml 再导入");
-        else song = parseJianpuText(await file.text(), base);
-    } catch (err) {
-        showToast(`导入失败：${err.message}`, 4200);
-        return;
-    }
-    // 重名就在后面加编号
-    let name = song.name;
-    let n = 2;
-    while (allSongs().some((s) => s.name === name)) name = `${song.name.slice(0, 20)} ${n++}`;
-    song.name = name;
-    customSongs.push(song);
-    const ok = persistCustomSongs();
-    if (currentScreen !== "music") enterMusicMode();
-    if (editorOpen) setEditorOpen(false);
-    selectSong(song);
-    showToast(`已导入「${name}」${ok ? "" : "（本地存不下，只在这次有效）"}，开始演奏`, 3200);
-    playSong();
-}
-
-// ============================================================
-// 听歌识曲：对着麦克风哼、唱或者弹一段，从曲库里认出是哪首
-// 做法：逐帧测音高（YIN）→ 切成一个个音 → 只看"音和音之间差几个半音"（和调无关、和快慢无关）
-// → 和曲库里每首歌做局部比对，分数最高的就是它。认不出来的也能存成一首新曲子。
-// ============================================================
-const listenPanel = $("listen-panel");
-const listenStatusEl = $("listen-status");
-const listenNoteEl = $("listen-note");
-const listenLevelEl = $("listen-level");
-const listenTrailEl = $("listen-trail");
-const listenResultsEl = $("listen-results");
-const NOTE_LETTERS = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
-
-let listener = null;
-
-function yin(buf, sr) {
-    // 先降一半采样率，运算量少四倍，人声和乐器的基频都还在
-    const n = buf.length >> 1;
-    const x = new Float32Array(n);
-    for (let i = 0; i < n; i++) x[i] = (buf[2 * i] + buf[2 * i + 1]) * 0.5;
-    const rate = sr / 2;
-    const tauMin = Math.max(2, Math.floor(rate / 1100));
-    const tauMax = Math.min(Math.floor(rate / 70), (n >> 1) - 1);
-    const W = n - tauMax - 1;
-    // 差分函数
-    const d = new Float32Array(tauMax + 2);
-    for (let tau = 1; tau <= tauMax + 1; tau++) {
-        let s = 0;
-        for (let i = 0; i < W; i++) {
-            const v = x[i] - x[i + tau];
-            s += v * v;
-        }
-        d[tau] = s;
-    }
-    // 累积均值归一化：周期处会掉到接近 0
-    const c = new Float32Array(tauMax + 2);
-    c[0] = 1;
-    let run = 0;
-    for (let tau = 1; tau <= tauMax + 1; tau++) {
-        run += d[tau];
-        c[tau] = run > 0 ? (d[tau] * tau) / run : 1;
-    }
-    // 第一个低于阈值的谷，再顺着滑到谷底
-    let tau = -1;
-    for (let t = tauMin; t <= tauMax; t++) {
-        if (c[t] < 0.13) {
-            while (t + 1 <= tauMax && c[t + 1] < c[t]) t++;
-            tau = t;
-            break;
-        }
-    }
-    if (tau < 0) return null;
-    // 抛物线插值，音高精确到几音分
-    const a = c[tau - 1];
-    const b = c[tau];
-    const e = c[tau + 1];
-    const denom = a - 2 * b + e;
-    const shift = Math.abs(denom) > 1e-9 ? (0.5 * (a - e)) / denom : 0;
-    return rate / (tau + Math.max(-0.5, Math.min(0.5, shift)));
-}
-
-async function startListening() {
-    if (listener) return;
-    stopPlayback();
-    setFollow(false);
-    listenPanel.hidden = false;
-    listenResultsEl.innerHTML = "";
-    listenTrailEl.textContent = "";
-    listenNoteEl.textContent = "–";
-    listenStatusEl.textContent = "请允许使用麦克风……";
-    $("btn-listen").classList.add("on");
-    const ctx = audio.ensure();
-    if (!ctx || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        listenStatusEl.textContent = "这个浏览器不能用麦克风（需要 https 或者本机 localhost 打开）";
-        $("btn-listen").classList.remove("on");
-        return;
-    }
-    let stream;
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-        });
-    } catch (err) {
-        listenStatusEl.textContent = "没拿到麦克风权限：在地址栏旁边允许一下，再点一次「听歌识曲」";
-        $("btn-listen").classList.remove("on");
-        return;
-    }
-    const src = ctx.createMediaStreamSource(stream);
-    const analyser = new AnalyserNode(ctx, { fftSize: 2048 });
-    src.connect(analyser); // 只分析，不接到扬声器，免得啸叫
-    const L = {
-        stream, src, analyser, buf: new Float32Array(2048), notes: [], cur: null, silent: 0,
-        started: performance.now(), timer: null, lastKey: null,
-    };
-    listener = L;
-    listenStatusEl.textContent = "正在听——哼、唱、弹都可以，一段旋律 5–15 秒就够";
-    L.timer = setInterval(() => listenTick(L, ctx.sampleRate), 30);
-}
-
-function listenTick(L, sr) {
-    L.analyser.getFloatTimeDomainData(L.buf);
-    let rms = 0;
-    for (let i = 0; i < L.buf.length; i++) rms += L.buf[i] * L.buf[i];
-    rms = Math.sqrt(rms / L.buf.length);
-    listenLevelEl.style.width = Math.min(100, rms * 900) + "%";
-    const t = (performance.now() - L.started) / 1000;
-    let midi = null;
-    if (rms > 0.008) {
-        const f = yin(L.buf, sr);
-        if (f && f > 65 && f < 1200) midi = 69 + 12 * Math.log2(f / 440);
-    }
-    if (midi == null) {
-        L.silent += 1;
-        if (L.silent >= 3) closeListenNote(L, t);
-    } else {
-        L.silent = 0;
-        const cur = L.cur;
-        if (cur && Math.abs(midi - median(cur.pitches)) < 0.75) {
-            cur.pitches.push(midi);
-        } else {
-            closeListenNote(L, t);
-            L.cur = { start: t, pitches: [midi] };
-        }
-        // 实时：唱到哪个音，3D 键盘上那颗键就亮一下
-        const m = Math.round(midi);
-        listenNoteEl.textContent = `${NOTE_LETTERS[((m % 12) + 12) % 12]}${Math.floor(m / 12) - 1}`;
-        const id = keyForMidi(m);
-        if (id && id !== L.lastKey && currentScreen === "music") {
-            stage.flare(id);
-            stage.pop(id);
-            L.lastKey = id;
-        }
-    }
-    // 听够了自动停
-    if (t > 15 || (L.notes.length >= 24 && L.silent > 25)) stopListening(true);
-}
-
-function median(arr) {
-    const s = arr.slice().sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
-}
-
-function closeListenNote(L, t) {
-    const cur = L.cur;
-    L.cur = null;
-    if (!cur || cur.pitches.length < 3) return; // 太短的是杂音
-    const midi = Math.round(median(cur.pitches));
-    L.notes.push({ midi, dur: t - cur.start, start: cur.start });
-    L.lastKey = null;
-    const span = document.createElement("span");
-    span.textContent = NOTE_LETTERS[((midi % 12) + 12) % 12];
-    listenTrailEl.appendChild(span);
-    while (listenTrailEl.children.length > 28) listenTrailEl.firstChild.remove();
-}
-
-function stopListening(identify) {
-    const L = listener;
-    if (!L) return;
-    listener = null;
-    clearInterval(L.timer);
-    closeListenNote(L, (performance.now() - L.started) / 1000);
-    try { L.src.disconnect(); } catch (err) { /* 已断开 */ }
-    L.stream.getTracks().forEach((tr) => tr.stop());
-    $("btn-listen").classList.remove("on");
-    listenLevelEl.style.width = "0%";
-    if (identify) showListenResults(L.notes);
-    else listenPanel.hidden = true;
-}
-
-// 音程序列：后一个音比前一个高 / 低几个半音。重复音（0）保留——"5 5 4 4"的重复本身就是特征；
-// 但哼唱时两个同音常被连成一个，所以比对时跳过一个 0 几乎不扣分
-function intervalsOf(pitches) {
-    const out = [];
-    for (let i = 1; i < pitches.length; i++) out.push(Math.max(-12, Math.min(12, pitches[i] - pitches[i - 1])));
-    return out;
-}
-
-function songPitches(song) {
-    const notes = parseScore(song.score);
-    const { events } = buildEvents(notes);
-    return events.map((e) => MAJOR[e.idx % 7] + 12 * Math.floor(e.idx / 7) + (e.alter || 0));
-}
-
-// Smith–Waterman 局部比对：哼的只是一小段，也能在整首里找到对应的那一截
-function localAlign(a, b) {
-    const n = a.length;
-    const m = b.length;
-    let best = 0;
-    let bestJ = 0;
-    let prev = new Float32Array(m + 1);
-    let cur = new Float32Array(m + 1);
-    for (let i = 1; i <= n; i++) {
-        cur[0] = 0;
-        const gapA = a[i - 1] === 0 ? 0.25 : 1.1;
-        for (let j = 1; j <= m; j++) {
-            const diff = Math.abs(a[i - 1] - b[j - 1]);
-            const s = diff === 0 ? (a[i - 1] === 0 ? 1.2 : 2) : diff === 1 ? 0.5 : -1.4;
-            const gapB = b[j - 1] === 0 ? 0.25 : 1.1;
-            const v = Math.max(0, prev[j - 1] + s, prev[j] - gapA, cur[j - 1] - gapB);
-            cur[j] = v;
-            if (v > best) {
-                best = v;
-                bestJ = j;
-            }
-        }
-        [prev, cur] = [cur, prev];
-    }
-    return { score: best, endJ: bestJ };
-}
-
-// 固定种子的洗牌：用来算"随便一段同样多的音程能碰巧对上多少分"
-function shuffledCopy(arr, seed) {
-    const a = arr.slice();
-    let x = seed;
-    for (let i = a.length - 1; i > 0; i--) {
-        x = (x * 1103515245 + 12345) & 0x7fffffff;
-        const j = x % (i + 1);
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-}
-
-function matchSongs(notes) {
-    const q = intervalsOf(notes.map((n) => n.midi));
-    if (q.length < 3) return [];
-    const qMax = q.reduce((sum, x) => sum + (x === 0 ? 1.2 : 2), 0);
-    return allSongs()
-        .map((song) => {
-            const ref = intervalsOf(songPitches(song));
-            if (ref.length < 3) return null;
-            const { score, endJ } = localAlign(q, ref);
-            // 扣掉"打乱顺序的同一首歌"能拿到的分：长歌里碰巧撞上一小段的机会多，不该因此占便宜
-            const base = Math.max(localAlign(q, shuffledCopy(ref, 7)).score, localAlign(q, shuffledCopy(ref, 31)).score);
-            const conf = Math.max(0, score - base) / Math.max(1, qMax - base);
-            // 对上的那一截大约从第几个音开始（用来在谱面上跳过去）
-            const startNote = Math.max(0, endJ - q.length);
-            return { song, conf: Math.min(1, conf), startNote };
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.conf - a.conf)
-        .slice(0, 3);
-}
-
-function showListenResults(notes) {
-    listenResultsEl.innerHTML = "";
-    if (notes.length < 4) {
-        listenStatusEl.textContent = "只听到几个音，不够认——离麦克风近一点，再唱长一点试试";
-        return;
-    }
-    const res = matchSongs(notes);
-    const top = res[0];
-    if (top && top.conf >= 0.42) listenStatusEl.textContent = `认出来了：像是《${top.song.name}》`;
-    else if (top && top.conf >= 0.22) listenStatusEl.textContent = `不太确定，最像《${top.song.name}》`;
-    else listenStatusEl.textContent = "曲库里没找到这段旋律";
-    res.forEach((r) => {
-        const row = document.createElement("div");
-        row.className = "listen-row";
-        row.innerHTML =
-            `<span class="lr-name">${escapeText(r.song.name)}</span>` +
-            `<span class="lr-bar"><span style="width:${Math.round(r.conf * 100)}%"></span></span>` +
-            `<span class="lr-pct">${Math.round(r.conf * 100)}%</span>`;
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "kbtn kbtn-accent kbtn-sm";
-        btn.textContent = "弹这首";
-        btn.addEventListener("click", () => {
-            listenPanel.hidden = true;
-            selectSong(r.song);
-            // 谱面跳到对上的那一截
-            const ev = currentEvents[Math.min(currentEvents.length - 1, r.startNote)];
-            if (ev) markScoreAt(ev.first);
-        });
-        row.appendChild(btn);
-        listenResultsEl.appendChild(row);
-    });
-    // 认不出来也不浪费：把听到的旋律存成一首新曲子
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "kbtn kbtn-mod kbtn-sm listen-save";
-    save.textContent = "✎ 把听到的记成谱";
-    save.addEventListener("click", () => {
-        const t0 = notes[0].start;
-        // 用听到的时长估一个速度：中位时长当一拍
-        const durs = notes.map((n) => n.dur).sort((a, b) => a - b);
-        const beat = Math.max(0.25, Math.min(1.2, durs[Math.floor(durs.length / 2)]));
-        const melody = notes.map((n) => ({ start: (n.start - t0) / beat, beats: Math.max(0.25, n.dur / beat), midi: n.midi }));
-        const song = melodyToSong({ name: "听写的旋律", melody, bpm: 60 / beat, source: "听写" });
-        song.perf = null;
-        listenPanel.hidden = true;
-        if (!editorOpen) setEditorOpen(true);
-        setMusicOctave(song.octave || 0);
-        fillEditor(song);
-        edNameEl.value = "";
-        edNameEl.placeholder = "给这段旋律起个名字";
-        edNameEl.focus();
-    });
-    listenResultsEl.appendChild(save);
 }
 
 // ============================================================
@@ -4582,7 +4686,7 @@ function togglePanel(panel, btn) {
     btn.setAttribute("aria-expanded", String(open));
 }
 
-// 选关：十二颗小键帽，每颗就是那一关那套键帽里的一颗
+// 选关：十四颗小键帽，每颗就是那一关那套键帽里的一颗，底下一道那一关的渐变
 function buildLevelChips() {
     const el = $("level-chips");
     LEVELS.forEach((lv, i) => {
@@ -4595,7 +4699,8 @@ function buildLevelChips() {
         chip.dataset.level = level;
         chip.style.setProperty("--chip", cw.alpha);
         chip.style.setProperty("--chip-ink", cw.alphaLegend);
-        chip.title = `第 ${level} 关 · ${cw.name} · ${inst.name} · ${lv.count} 个键`;
+        if (cw.grad && cw.grad.length > 1) chip.style.setProperty("--chip-grad", `linear-gradient(90deg, ${cw.grad.join(", ")})`);
+        chip.title = `第 ${level} 关 · ${cw.name} · ${inst.name} · ${lv.count} 个键` + (lv.design ? " · 起终点固定" : "");
         chip.setAttribute("aria-label", chip.title);
         chip.innerHTML =
             `<span class="level-chip-num">${pad2(level)}</span>` +
@@ -4632,6 +4737,8 @@ function bindEvents() {
             }
         } else if (currentScreen === "music") {
             musicPointerDown(id, holder);
+        } else if (currentScreen === "reward") {
+            launchLetter(id);
         }
     });
     stage.on("keyup", (id, holder) => {
@@ -4648,9 +4755,20 @@ function bindEvents() {
     // ---- Safari：切到别的标签页再回来，音频会被挂起；任何一次点击/按键都顺手恢复 ----
     const unlock = () => audio.unlock();
     ["pointerdown", "keydown", "touchend"].forEach((t) => window.addEventListener(t, unlock, true));
+    // 输出设备换了（插上 / 连上耳机）或者音频刚跑起来：重新看一眼延迟。
+    // 设备刚切过去时系统报的数还不准，等一会儿再读
+    const recheckLatency = () => setTimeout(() => {
+        const L = audio.latency();
+        if (L && L.total < LAG_NOTICE) lagNoticed = false; // 换回了有线 / 外放：下次再连蓝牙还会提示
+        checkLatency();
+    }, 1200);
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+        navigator.mediaDevices.addEventListener("devicechange", recheckLatency);
+    }
     audio.onState = (st) => {
         if (st === "running") {
             if (toastEl.dataset.kind === "audio") hideToast();
+            recheckLatency();
         } else if (soundOn && !document.hidden) {
             toastEl.dataset.kind = "audio";
             showToast("声音被浏览器暂停了——点一下页面任意位置就恢复", 0);
@@ -4676,7 +4794,7 @@ function bindEvents() {
             if (!e.repeat) mirrorDown(e.code, "esc");
             // 面板开着先收面板，否则 Esc 就是退出音乐模式
             if (!levelPanelEl.hidden || !stylePanelEl.hidden) closePanels();
-            else if (listener) stopListening(false);
+            else if (abyssOn) exitAbyss();
             else if (currentScreen === "music") exitMusicMode();
             return;
         }
@@ -4686,6 +4804,24 @@ function bindEvents() {
 
         // 焦点在按钮上时，空格和回车是按那个按钮，不是踩踏板
         const onControl = e.target && e.target.closest && e.target.closest("button, a, [role='button']");
+
+        // 过关页：字母键 = 放飞挂在那颗键上的字母；空格 = 全部放飞；Enter = 下一关
+        if (currentScreen === "reward") {
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            if (e.code === "Space" && !onControl) {
+                e.preventDefault();
+                if (!e.repeat) releaseAllLetters();
+                return;
+            }
+            if (e.key === "Enter" && !onControl) {
+                e.preventDefault();
+                if (!e.repeat) goToNextLevel();
+                return;
+            }
+            const rid = noteIdOf(e);
+            if (rid && !e.repeat && !launchLetter(rid)) tapWithoutLetter(rid);
+            return;
+        }
         if (e.code === "Space" || e.key === " ") {
             if (!instrumentActive() || onControl) return;
             e.preventDefault(); // 空格默认会滚页面
@@ -4812,7 +4948,7 @@ function bindEvents() {
     window.addEventListener("resize", () => {
         sizeConfettiCanvas();
         if (currentScreen === "home" && homeChapter) onHomeScroll();
-        else if (currentScreen === "music") stage.setView(musicView());
+        else if (currentScreen === "music" && !abyssOn) stage.setView(musicView());
         else if (currentScreen === "game") stage.setView(gameView());
     });
 
@@ -4879,6 +5015,7 @@ function bindEvents() {
     $("btn-hint").addEventListener("click", showHint);
     $("btn-skip").addEventListener("click", skipLevel);
     $("btn-next").addEventListener("click", goToNextLevel);
+    $("btn-release-all").addEventListener("click", releaseAllLetters);
     $("btn-restart-game").addEventListener("click", restartGame);
 
     $("btn-sound").addEventListener("click", () => {
@@ -4903,6 +5040,14 @@ function bindEvents() {
     });
 
     // ---- 音乐模式 ----
+    $("btn-abyss").addEventListener("click", enterAbyss);
+    $("btn-abyss-mode").addEventListener("click", () => {
+        audio.ensure();
+        closePanels();
+        enterAbyss();
+    });
+    $("btn-abyss-exit").addEventListener("click", exitAbyss);
+    $("btn-abyss-play").addEventListener("click", playAbyssDemo);
     $("key-down").addEventListener("click", () => setMusicKey(musicKey - 1, { announce: true }));
     $("key-up").addEventListener("click", () => setMusicKey(musicKey + 1, { announce: true }));
     $("oct-down").addEventListener("click", () => setMusicOctave(musicOctave - 1, { announce: true }));
@@ -4950,54 +5095,6 @@ function bindEvents() {
         edScoreEl.selectionStart = edScoreEl.selectionEnd = s + 2;
         refreshEditor();
     });
-
-    // 导入：按钮选文件，或者直接把文件拖进页面
-    const fileInput = $("file-import");
-    $("btn-import").addEventListener("click", () => {
-        audio.ensure();
-        fileInput.click();
-    });
-    fileInput.addEventListener("change", () => {
-        const f = fileInput.files && fileInput.files[0];
-        fileInput.value = "";
-        if (f) importScoreFile(f);
-    });
-    const dropHint = $("drop-hint");
-    let dragDepth = 0;
-    const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
-    window.addEventListener("dragenter", (e) => {
-        if (!hasFiles(e)) return;
-        dragDepth += 1;
-        dropHint.hidden = false;
-    });
-    window.addEventListener("dragleave", () => {
-        dragDepth = Math.max(0, dragDepth - 1);
-        if (!dragDepth) dropHint.hidden = true;
-    });
-    window.addEventListener("dragover", (e) => {
-        if (hasFiles(e)) e.preventDefault();
-    });
-    window.addEventListener("drop", (e) => {
-        if (!hasFiles(e)) return;
-        e.preventDefault();
-        dragDepth = 0;
-        dropHint.hidden = true;
-        const f = e.dataTransfer.files && e.dataTransfer.files[0];
-        if (f) {
-            audio.ensure();
-            importScoreFile(f);
-        }
-    });
-
-    // 听歌识曲
-    $("btn-listen").addEventListener("click", () => {
-        if (listener) stopListening(true);
-        else startListening();
-    });
-    $("btn-listen-stop").addEventListener("click", () => {
-        if (listener) stopListening(true);
-        else listenPanel.hidden = true;
-    });
 }
 
 // ============================================================
@@ -5035,6 +5132,36 @@ function init() {
 
 if (stage) {
     init();
+    // 自测用：地址后面加 ?debug 才把内部状态挂到 window 上
+    if (/[?&]debug\b/.test(location.search)) {
+        window.__ub = {
+            stage, audio, state, style, LEVELS, SONGS, startLevel, handleKeyPress, showHint, skipLevel, solveFrom,
+            completeLevel, goToNextLevel, showScreen, enterMusicMode, setInstrument, selectSong, playSong,
+            applyStyle, setMood, setScene, setFxField, get currentScreen() { return currentScreen; },
+            parseScore, musicSemitone, get currentNotes() { return currentNotes; },
+            abyss, enterAbyss, exitAbyss, musicPlayer, dream, dreamSky, enterDream, leaveDream, visualLag,
+            // 预览窗口在后台时 WebGL 画布不会被合成进截图：画一帧，拍成图片盖在画布上，截完再拿掉
+            snap(seconds = 0.2) {
+                stage.advance(seconds);
+                const url = stage.canvas.toDataURL("image/png");
+                let img = document.getElementById("__snap");
+                if (!img) {
+                    img = document.createElement("img");
+                    img.id = "__snap";
+                    img.style.cssText = "position:absolute;z-index:5;pointer-events:none;";
+                }
+                const r = stage.canvas.getBoundingClientRect();
+                Object.assign(img.style, { left: r.left + scrollX + "px", top: r.top + scrollY + "px", width: r.width + "px", height: r.height + "px" });
+                img.src = url;
+                document.body.appendChild(img);
+                return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+            },
+            unsnap() {
+                const img = document.getElementById("__snap");
+                if (img) img.remove();
+            },
+        };
+    }
 } else {
     $("webgl-fallback").hidden = false;
 }

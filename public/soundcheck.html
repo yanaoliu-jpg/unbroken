@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#041211">
+    <title>声音检测 · Unbroken</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23041211'/%3E%3Cpath d='M8 9h6v7h6v7h4' fill='none' stroke='%234fe6c4' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body.sc { padding: 28px 20px 60px; }
+        .sc-wrap { max-width: 980px; margin: 0 auto; }
+        .sc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+        .sc-title { margin: 0; font-family: var(--font-display); font-weight: 800; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.01em; }
+        .sc-sub { margin: 4px 0 0; color: var(--ink-3); font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; }
+        .sc-back { color: var(--glow); text-decoration: none; font-weight: 650; }
+        .sc-card { margin-bottom: 18px; padding: 20px 22px; border-radius: 20px; background: var(--glass); border: 1px solid var(--line); }
+        .sc-card h2 { margin: 0 0 4px; font-size: 18px; font-weight: 750; }
+        .sc-card > p { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; }
+        .sc-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .sc-meter { position: relative; flex: 1 1 260px; height: 14px; border-radius: 8px; background: var(--line); overflow: hidden; }
+        .sc-meter i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 8px; background: linear-gradient(90deg, var(--glow), var(--accent)); transition: width 60ms linear; }
+        .sc-meter b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: 0.8; }
+        .sc-state { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); min-width: 220px; }
+        .sc-verdict { margin-top: 10px; font-weight: 650; }
+        .sc-verdict.bad { color: var(--error); }
+        table.sc-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+        .sc-table th { text-align: left; font-weight: 600; color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; padding: 6px 6px; border-bottom: 1px solid var(--line-2); }
+        .sc-table td { padding: 6px 6px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); }
+        .sc-table td.n { font-family: var(--font-ui); font-weight: 650; white-space: nowrap; }
+        .sc-dev { position: relative; width: 160px; height: 10px; }
+        .sc-dev::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--line-2); }
+        .sc-dev i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--glow); }
+        .sc-dev i.lo { background: var(--accent); }
+        .sc-play { padding: 3px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: transparent; cursor: pointer; }
+        .sc-play:hover { background: var(--line); }
+        select.sc-select { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-2); background: color-mix(in oklab, var(--bg) 70%, transparent); color: var(--ink); font: inherit; font-size: 13.5px; }
+        .sc-spec { position: relative; margin-top: 14px; border-radius: 12px; overflow: hidden; background: #000; }
+        .sc-spec canvas { display: block; width: 100%; height: 260px; image-rendering: pixelated; }
+        .sc-axis { position: absolute; left: 6px; font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,0.7); text-shadow: 0 0 4px #000; }
+        .sc-note { margin-top: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+        .sc-matrix { display: grid; gap: 1px; margin-top: 14px; font-family: var(--font-mono); font-size: 9.5px; overflow-x: auto; }
+        .sc-matrix span { display: grid; place-items: center; min-width: 26px; height: 22px; border-radius: 3px; }
+        .sc-matrix .h { color: var(--ink-3); white-space: nowrap; }
+        .sc-pairs { margin: 12px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; }
+        .sc-how ol { margin: 8px 0 0; padding-left: 20px; color: var(--ink-2); font-size: 14px; line-height: 1.9; }
+        .sc-how code { padding: 1px 6px; border-radius: 5px; background: var(--line); font-family: var(--font-mono); font-size: 12.5px; }
+        .sc-progress { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
+        .sc-h3 { margin: 22px 0 4px; font-size: 15px; font-weight: 700; }
+        #lat-read.bad { color: var(--error); }
+        #lat-read b { color: var(--ink); }
+        .sc-lat { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 14px; }
+        .sc-lat:empty { display: none; }
+        .sc-lat i { display: flex; flex-direction: column; justify-content: center; flex: 1 0 auto; min-width: max-content; padding: 8px 10px; border-radius: 10px; font-style: normal;
+            background: color-mix(in oklab, var(--glow) 14%, transparent); border: 1px solid var(--line); overflow: hidden; }
+        .sc-lat i.l3 { background: color-mix(in oklab, var(--accent) 22%, transparent); }
+        .sc-lat b { font-size: 12px; font-weight: 650; color: var(--ink-2); white-space: nowrap; }
+        .sc-lat span { font-family: var(--font-mono); font-size: 13px; color: var(--ink); }
+        .sc-tap { flex: 1 1 220px; min-height: 56px; border-radius: 14px; border: 1px dashed var(--line-2); background: transparent; color: var(--ink-2);
+            font: inherit; font-weight: 650; cursor: pointer; touch-action: manipulation; transition: background 120ms ease, transform 120ms ease; }
+        .sc-tap.on { border-style: solid; border-color: var(--glow); color: var(--ink); }
+        .sc-tap.hit { animation: sc-hit 180ms ease-out; }
+        @keyframes sc-hit { from { background: color-mix(in oklab, var(--glow) 45%, transparent); transform: scale(0.97); } to { background: transparent; transform: none; } }
+        .sc-table tr.sum td { border-bottom: 0; padding-top: 10px; }
+    </style>
+</head>
+<body class="sc">
+    <div class="bg" aria-hidden="true"><div class="bg-light bg-light-a"></div><div class="bg-light bg-light-b"></div></div>
+    <main class="sc-wrap">
+        <header class="sc-head">
+            <div>
+                <h1 class="sc-title">声音检测</h1>
+                <p class="sc-sub">Sound Check · 把声音变成看得见的数字和图</p>
+            </div>
+            <a class="sc-back" href="./">← 回到 Unbroken</a>
+        </header>
+
+        <section class="sc-card" id="live">
+            <h2>① 实时自检</h2>
+            <p>点一下，弹一个和弦，看看声音有没有真的送到扬声器。没声音的时候先点这里：它会告诉你是浏览器把音频挂起了、音量是 0，还是一切正常。</p>
+            <div class="sc-row">
+                <button class="kbtn kbtn-accent kbtn-sm" id="btn-live" type="button">▶ 弹一声试试</button>
+                <div class="sc-meter" aria-label="输出电平"><i id="live-bar"></i><b id="live-peak" style="left:0"></b></div>
+                <span class="sc-state" id="live-state">还没开始</span>
+            </div>
+            <p class="sc-verdict" id="live-verdict"></p>
+        </section>
+
+        <section class="sc-card" id="balance">
+            <h2>② 响度平衡</h2>
+            <p>每件乐器按三种弹法各渲染一遍（一句旋律 · 快速点按 · 长音按住），用 ITU-R BS.1770 量响度（LUFS，广播和流媒体做响度统一用的就是它）。"综合"= 旋律 50% + 长音最响处 30% + 点按最响处 20%，就是平时弹琴时耳朵感觉到的"响不响"。偏差条越靠中间越好；±1 dB 以内耳朵基本分不出来。</p>
+            <div class="sc-row">
+                <button class="kbtn kbtn-accent kbtn-sm" id="btn-measure" type="button">开始测量（约半分钟）</button>
+                <span class="sc-progress" id="measure-progress"></span>
+            </div>
+            <table class="sc-table" id="balance-table" hidden>
+                <thead><tr><th>乐器</th><th>旋律</th><th>点按·最响</th><th>长音·最响</th><th>峰值</th><th>综合</th><th>偏差（±6 dB）</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <p class="sc-note" id="balance-summary"></p>
+        </section>
+
+        <section class="sc-card" id="spectro">
+            <h2>③ 频谱</h2>
+            <p>横着是时间，竖着是频率（下低上高，对数刻度），越亮越响。能一眼看出：起音快不快、泛音有多少、尾巴拖多长、有没有奇怪的噪声。</p>
+            <div class="sc-row">
+                <select class="sc-select" id="spec-inst" aria-label="乐器"></select>
+                <select class="sc-select" id="spec-pattern" aria-label="弹法"></select>
+                <button class="kbtn kbtn-mod kbtn-sm" id="btn-spec" type="button">画出来</button>
+                <button class="kbtn kbtn-mod kbtn-sm" id="btn-spec-play" type="button">▶ 听这一段</button>
+            </div>
+            <div class="sc-spec">
+                <canvas id="spec-canvas" width="900" height="260"></canvas>
+                <span class="sc-axis" style="top:4px">16k</span>
+                <span class="sc-axis" style="top:calc(260px * 0.23)">4k</span>
+                <span class="sc-axis" style="top:calc(260px * 0.46)">1k</span>
+                <span class="sc-axis" style="top:calc(260px * 0.69)">250</span>
+                <span class="sc-axis" style="bottom:4px">40 Hz</span>
+            </div>
+            <p class="sc-note" id="spec-note"></p>
+        </section>
+
+        <section class="sc-card" id="similar">
+            <h2>④ 乐器像不像</h2>
+            <p>每件乐器弹同一个长音，比音色指纹（MFCC 梅尔倒谱 + 起音快慢 + 衰减 + 亮度）。越接近 100 越像；两件乐器超过 90 就说明换过去耳朵不太听得出区别。</p>
+            <button class="kbtn kbtn-mod kbtn-sm" id="btn-similar" type="button">比一比</button>
+            <div class="sc-matrix" id="sim-matrix"></div>
+            <ol class="sc-pairs" id="sim-pairs"></ol>
+        </section>
+
+        <section class="sc-card" id="latency">
+            <h2>⑤ 延迟：按下去多久才听见</h2>
+            <p>一个音从"按下"到"耳朵听见"要走四段：网页自己（不到 1 ms）→ 限幅器（6 ms）→ 浏览器的音频缓冲（几毫秒）→ 系统和耳机。前三段每台电脑都差不多，差别几乎全在最后一段：外放和有线耳机一般 10–40 ms，蓝牙耳机常常 150–300 ms。</p>
+            <div class="sc-row">
+                <button class="kbtn kbtn-mod kbtn-sm" id="btn-lat" type="button">读一下现在的延迟</button>
+                <span class="sc-state" id="lat-read">插拔耳机后会自动刷新</span>
+            </div>
+            <div class="sc-lat" id="lat-bar" aria-label="各段延迟"></div>
+            <h3 class="sc-h3">实测：跟着节拍按空格</h3>
+            <p>浏览器报的数不一定准（尤其是蓝牙）。戴上耳机，先听四下"嗒"，从第五下开始跟着按空格（或点右边的大按钮），一共十二下。
+                有线耳机或外放测一次、蓝牙耳机再测一次：人手本身的快慢两次都一样，<b>两次的差就是蓝牙多出来的延迟</b>。</p>
+            <div class="sc-row">
+                <select class="sc-select" id="lat-device" aria-label="现在用的是">
+                    <option value="wired">有线耳机 / 外放</option>
+                    <option value="bt">蓝牙耳机</option>
+                </select>
+                <button class="kbtn kbtn-accent kbtn-sm" id="btn-tap" type="button">开始（约 10 秒）</button>
+                <button class="sc-tap" id="tap-pad" type="button">跟着"嗒"按这里 / 空格</button>
+            </div>
+            <p class="sc-verdict" id="tap-status"></p>
+            <table class="sc-table" id="tap-results">
+                <thead><tr><th>设备</th><th>实测</th><th>稳不稳</th><th>测于</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <section class="sc-card sc-how">
+            <h2>⑥ 怎么让 Claude "听到"</h2>
+            <p>Claude 没有耳朵，但能读数字、能看图。所以"听"是这样做的：</p>
+            <ol>
+                <li>上面这几张表和图就是它的耳朵：响度、峰值、频谱、像不像，全是离线渲染出来量的，和你听到的是同一条声音链路。</li>
+                <li>想让它听你那边真实放出来的声音：用 QuickTime（文件 → 新建音频录制）或手机录一段，把文件放进项目文件夹（比如 <code>recordings/</code>），告诉它文件名。它会用 ffmpeg 把录音变成频谱图、测音高和节奏，再和谱子逐个音对。</li>
+                <li>"好不好听"这种事它判断不了，你用一句话描述就行——"F4 太刺耳""人声太小""这个鼓太闷"。它会先测出对应的数字，改完再测一次给你看变化。</li>
+            </ol>
+        </section>
+    </main>
+    <script type="module" src="js/soundcheck-page.js"></script>
+</body>
+</html>

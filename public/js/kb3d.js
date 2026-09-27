@@ -283,6 +283,77 @@ const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 const WHITE = new THREE.Color(1, 1, 1);
+const GHOST = new THREE.Color("#9aa0a8");
+
+// ============================================================
+// 渐变：几种颜色之间在 OKLab 里插值（和 CSS 的 color-mix(in oklab) 一样），中间不会发灰发脏。
+// 预先算好 64 档，取色只是查表
+// ============================================================
+const toLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const toSrgb = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
+
+function hexToOklab(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const r = toLinear(((n >> 16) & 255) / 255);
+    const g = toLinear(((n >> 8) & 255) / 255);
+    const b = toLinear((n & 255) / 255);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [
+        0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+    ];
+}
+
+function oklabToLinear([L, a, b]) {
+    const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3);
+    const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3);
+    const s = Math.pow(L - 0.0894841775 * a - 1.291485548 * b, 3);
+    return [
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+    ].map((v) => Math.min(1, Math.max(0, v)));
+}
+
+export class Gradient {
+    constructor(stops, size = 64) {
+        const labs = (stops && stops.length ? stops : ["#ffffff"]).map(hexToOklab);
+        this.stops = stops;
+        this.size = size;
+        this.lin = [];
+        this.hex = [];
+        for (let i = 0; i < size; i++) {
+            const t = (i / (size - 1)) * (labs.length - 1);
+            const k = Math.min(labs.length - 2, Math.floor(t));
+            const lab = labs.length === 1 ? labs[0] : labs[k].map((v, j) => v + (labs[k + 1][j] - v) * (t - k));
+            const lin = oklabToLinear(lab);
+            this.lin.push(new THREE.Color().setRGB(lin[0], lin[1], lin[2])); // three 的工作色彩空间就是线性 sRGB
+            this.hex.push("#" + lin.map((v) => Math.round(toSrgb(v) * 255).toString(16).padStart(2, "0")).join(""));
+        }
+    }
+
+    _i(t) {
+        return Math.round(Math.min(1, Math.max(0, t)) * (this.size - 1));
+    }
+
+    // 线性空间的 THREE.Color（共享的，别直接改它）
+    color(t) {
+        return this.lin[this._i(t)];
+    }
+
+    css(t) {
+        return this.hex[this._i(t)];
+    }
+
+    // 超出 0–1 时来回折返：流动的时候颜色是一路荡过去再荡回来，不会在尽头"跳"回起点
+    cycle(t) {
+        const u = ((t % 2) + 2) % 2;
+        return this.color(u > 1 ? 2 - u : u);
+    }
+}
 const damp = (dt, rate) => 1 - Math.exp(-dt * rate);
 const lerpAngle = (a, b, t) => a + (b - a) * t;
 
@@ -292,14 +363,22 @@ const lerpAngle = (a, b, t) => a + (b - a) * t;
 // setFlow 打开后，几颗光点会顺着线一路流过去——线是"活"的，不是一根静止的灯管。
 // ============================================================
 export class GlowPath {
-    constructor(stage, { radius = 0.055, color = "#ffffff", glow = 1, shadow = true, emissive = 1, ghost = false } = {}) {
+    constructor(stage, { radius = 0.055, color = "#ffffff", glow = 1, shadow = true, emissive = 1, ghost = false, gradient = null } = {}) {
         this.stage = stage;
         this.group = new THREE.Group();
         this.radius = radius;
         this.ghost = ghost;
         this.color = new THREE.Color(color);
         // 跳过的关卡在塔里是一层"虚影"：颜色褪一半、不怎么发光
-        if (ghost) this.color.lerp(new THREE.Color("#9aa0a8"), 0.5);
+        if (ghost) this.color.lerp(GHOST, 0.5);
+        // 渐变：线从起点到终点换颜色。颜色按 48 档分桶，每档一份材质，几十段线共用
+        this.gradient = gradient;
+        this.span = 0;      // 这条线最终会有几个点（还在一步步画的时候，已经画好的颜色不会跟着变）
+        this.shift = 0;     // 整条线的颜色沿线挪动（过关时颜色顺着线流过去）
+        this._buckets = new Map();
+        this.lift = 0;      // 整条线离开键盘浮起来多高
+        this.liftGoal = 0;
+        this.cometU = -1;
         this.emissiveBase = 1.5 * emissive * (ghost ? 0.35 : 1);
         this.glowBase = 0.55 * glow * (ghost ? 0.4 : 1);
         this.coreMat = new THREE.MeshStandardMaterial({
@@ -326,7 +405,7 @@ export class GlowPath {
 
     setColor(color) {
         this.color.set(color);
-        if (this.ghost) this.color.lerp(new THREE.Color("#9aa0a8"), 0.5);
+        if (this.ghost) this.color.lerp(GHOST, 0.5);
         this.coreMat.color.copy(this.color);
         this.coreMat.emissive.copy(this.color);
         this.glowMat.uniforms.uColor.value.copy(this.color);
@@ -335,6 +414,147 @@ export class GlowPath {
             this.beadGlow.uniforms.uColor.value.copy(this.color);
         }
         this.stage._touch();
+    }
+
+    // 换一套渐变（null = 单色）
+    setGradient(gradient) {
+        this.gradient = gradient;
+        this._buckets.forEach((m) => this._tint(m));
+        this._assignMats();
+        this.stage._touch();
+    }
+
+    // 颜色沿线整体挪 s（0–1 为一整段）：挪动时每一档材质换色就行，不用碰几何
+    setShift(s) {
+        if (Math.abs(s - this.shift) < 1e-4) return;
+        this.shift = s;
+        this._buckets.forEach((m) => this._tint(m));
+        this.stage._touch();
+    }
+
+    // 整条线浮起来（过关：笔迹离开键盘，悬在上面）
+    setLift(y) {
+        this.liftGoal = y;
+        this.stage._touch(true);
+    }
+
+    _bucketOf(t) {
+        return Math.round(Math.min(1, Math.max(0, t)) * 47);
+    }
+
+    _tint(m) {
+        const c = m.core.color.copy(this.gradient ? this.gradient.cycle(m.b / 47 + this.shift) : this.color);
+        if (this.ghost) c.lerp(GHOST, 0.5);
+        m.core.emissive.copy(c);
+        m.glow.uniforms.uColor.value.copy(c);
+    }
+
+    // 第 t（0–1）处用哪一份材质
+    _mats(t) {
+        if (!this.gradient) return { core: this.coreMat, glow: this.glowMat };
+        const b = this._bucketOf(t);
+        let m = this._buckets.get(b);
+        if (!m) {
+            m = { b, core: this.coreMat.clone(), glow: this.glowMat.clone() };
+            this._buckets.set(b, m);
+            this._tint(m);
+        }
+        return m;
+    }
+
+    // 第 i 个点在整条线上的位置（0–1）
+    _t(i) {
+        const n = Math.max(this.span || 0, this.joints.length, 2);
+        return i / (n - 1);
+    }
+
+    _assignMats() {
+        this.segs.forEach((s, i) => {
+            const m = this._mats(this._t(i + 0.5));
+            s.core.material = m.core;
+            s.halo.material = m.glow;
+        });
+        this.joints.forEach((j, i) => {
+            const m = this._mats(this._t(i));
+            j.core.material = m.core;
+            j.halo.material = m.glow;
+        });
+    }
+
+    // 一颗亮点顺着整条线跑（u：0 起点 → 1 终点；null 收起）。过关回放时笔尖就是它
+    setComet(u, { size = 1 } = {}) {
+        if (u == null || u < 0 || !this.segs.length) {
+            if (this.cometCore) this.cometCore.visible = this.cometHalo.visible = false;
+            if (this.cometTrail) this.cometTrail.forEach((t) => { t.visible = false; });
+            this.cometU = -1;
+            this.stage._touch();
+            return;
+        }
+        if (!this.cometCore) {
+            this.cometMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            this.cometGlow = glowMaterial("#ffffff", 1.7);
+            this.cometTrailGlow = glowMaterial("#ffffff", 0.7);
+            this.cometCore = new THREE.Mesh(this.stage._unitSphere, this.cometMat);
+            this.cometHalo = new THREE.Mesh(this.stage._unitSphere, this.cometGlow);
+            this.cometTrail = Array.from({ length: 6 }, () => new THREE.Mesh(this.stage._unitSphere, this.cometTrailGlow));
+            [this.cometCore, this.cometHalo, ...this.cometTrail].forEach((m) => { m.renderOrder = 7; this.group.add(m); });
+        }
+        this.cometU = u;
+        const total = this.length;
+        const at = (uu, out) => this._at(uu, out, total);
+        const r = this.radius * size;
+        at(u, this.cometCore.position);
+        this.cometHalo.position.copy(this.cometCore.position);
+        this.cometCore.scale.setScalar(r * 2.1);
+        this.cometHalo.scale.setScalar(r * 9);
+        const c = this.gradient ? this.gradient.color(u) : this.color;
+        this.cometMat.color.copy(c).lerp(WHITE, 0.7);
+        this.cometGlow.uniforms.uColor.value.copy(c);
+        this.cometTrailGlow.uniforms.uColor.value.copy(c);
+        this.cometCore.visible = this.cometHalo.visible = true;
+        // 拖尾：往回按弧长均匀放几颗越来越小的光
+        this.cometTrail.forEach((m, i) => {
+            const back = u - ((i + 1) * 0.35) / Math.max(1, total);
+            m.visible = back > 0;
+            if (!m.visible) return;
+            at(back, m.position);
+            m.scale.setScalar(r * (6.5 - i * 0.9));
+        });
+        this.stage._touch();
+    }
+
+    // 线上按弧长第 u（0–1）处的点（线自己的坐标，不含浮起的高度）
+    _at(u, out, total = this.length) {
+        if (!this.segs.length) return out.set(0, 0, 0);
+        let d = Math.max(0, Math.min(1, u)) * total;
+        for (const s of this.segs) {
+            const len = s.a.distanceTo(s.b);
+            if (d <= len || s === this.segs[this.segs.length - 1]) return out.lerpVectors(s.a, s.b, Math.min(1, d / Math.max(1e-4, len)));
+            d -= len;
+        }
+        return out.copy(this.segs[0].a);
+    }
+
+    // 同上，世界坐标（算上整条线浮起来的高度）：粒子从线上冒出来时用
+    pointAt(u, out = new THREE.Vector3()) {
+        return this._at(u, out).add(this.group.position);
+    }
+
+    // 彗星此刻在哪（世界坐标）；没在跑时 null
+    cometWorld(out = new THREE.Vector3()) {
+        if (this.cometU < 0 || !this.cometCore || !this.cometCore.visible) return null;
+        return out.copy(this.cometCore.position).add(this.group.position);
+    }
+
+    // 正在画的那一笔的笔尖（世界坐标）；整条都画完了返回 null
+    tip(out = new THREE.Vector3()) {
+        for (let i = 0; i < this.segs.length; i++) {
+            const s = this.segs[i];
+            if (s.p >= s.target - 1e-3) continue;
+            if (s.p <= 1e-4) return i > 0 ? out.copy(s.a).add(this.group.position) : null;
+            return out.lerpVectors(s.a, s.b, s.p).add(this.group.position);
+        }
+        return null;
     }
 
     // 光点顺着线流动：{ count, speed（键距/秒）, size }；传 null 关掉
@@ -361,8 +581,10 @@ export class GlowPath {
         this.stage._touch();
     }
 
-    // points: Vector3[]；grow=true 时只有新增的那一段从头长出来
-    setPoints(points, { grow = true } = {}) {
+    // points: Vector3[]；grow=true 时只有新增的那一段从头长出来；span：整条线最终的点数（渐变按它分配颜色）
+    setPoints(points, { grow = true, span = 0 } = {}) {
+        const spanChanged = span !== this.span;
+        this.span = span;
         const n = Math.max(0, points.length - 1);
         // 前缀不变的段原样保留，后面的删掉重建
         let keep = 0;
@@ -385,6 +607,15 @@ export class GlowPath {
             if (!grow) j.s = 1;
         }
         this.points = points.map((p) => p.clone());
+        if (this.gradient) this._assignMats();
+        else if (spanChanged) this._assignMats();
+        this._layout();
+        this.stage._touch(true);
+    }
+
+    // 还在一段段长的线一下子长满（过关回放开始时：手快的人最后几步的线可能还没画完）
+    complete() {
+        this.segs.forEach((s) => { s.p = s.target; });
         this._layout();
         this.stage._touch(true);
     }
@@ -407,9 +638,10 @@ export class GlowPath {
 
     _addSeg(a, b) {
         const geo = this.stage._unitCylinder;
-        const core = new THREE.Mesh(geo, this.coreMat);
+        const m = this._mats(this._t(this.segs.length + 0.5));
+        const core = new THREE.Mesh(geo, m.core);
         core.castShadow = this.shadow;
-        const halo = new THREE.Mesh(geo, this.glowMat);
+        const halo = new THREE.Mesh(geo, m.glow);
         halo.renderOrder = 5;
         this.group.add(core, halo);
         const seg = { core, halo, a: a.clone(), b: b.clone(), p: 1, target: 1 };
@@ -425,9 +657,10 @@ export class GlowPath {
 
     _addJoint(p) {
         const geo = this.stage._unitSphere;
-        const core = new THREE.Mesh(geo, this.coreMat);
+        const m = this._mats(this._t(this.joints.length));
+        const core = new THREE.Mesh(geo, m.core);
         core.castShadow = this.shadow;
-        const halo = new THREE.Mesh(geo, this.glowMat);
+        const halo = new THREE.Mesh(geo, m.glow);
         halo.renderOrder = 5;
         core.position.copy(p);
         halo.position.copy(p);
@@ -545,11 +778,27 @@ export class GlowPath {
         }
         const pulsing = this.pulse > 0;
         if (pulsing) this.pulse = Math.max(0, this.pulse - dt * 1.4);
-        this.coreMat.emissiveIntensity = this.emissiveBase + this.pulse * 2.2;
-        this.glowMat.uniforms.uIntensity.value = this.glowBase + this.pulse * 0.9;
+        const ei = this.emissiveBase + this.pulse * 2.2;
+        const gi = this.glowBase + this.pulse * 0.9;
+        this.coreMat.emissiveIntensity = ei;
+        this.glowMat.uniforms.uIntensity.value = gi;
+        this._buckets.forEach((m) => {
+            m.core.emissiveIntensity = ei;
+            m.glow.uniforms.uIntensity.value = gi;
+        });
         if (moving || this._animating) this._layout();
         const beads = this._updateBeads(dt);
-        return (moving || this._animating || pulsing || beads ? 1 : 0) | (moving || this._animating ? 2 : 0);
+        // 浮起 / 落下
+        let lifting = false;
+        if (Math.abs(this.liftGoal - this.lift) > 1e-3) {
+            this.lift += (this.liftGoal - this.lift) * damp(dt, 2.6);
+            lifting = true;
+        } else if (this.lift !== this.liftGoal) {
+            this.lift = this.liftGoal;
+            lifting = true;
+        }
+        this.group.position.y = this.lift;
+        return (moving || this._animating || pulsing || beads || lifting ? 1 : 0) | (moving || this._animating || lifting ? 2 : 0);
     }
 
     get finished() {
@@ -564,6 +813,15 @@ export class GlowPath {
         this.stage.scene.remove(this.group);
         this.coreMat.dispose();
         this.glowMat.dispose();
+        this._buckets.forEach((m) => {
+            m.core.dispose();
+            m.glow.dispose();
+        });
+        if (this.cometMat) {
+            this.cometMat.dispose();
+            this.cometGlow.dispose();
+            this.cometTrailGlow.dispose();
+        }
         if (this.beadCore) {
             this.beadCore.dispose();
             this.beadGlow.dispose();
@@ -671,15 +929,28 @@ export class KeyboardStage {
         this._perf = { sum: 0, n: 0, changedAt: 0, good: 0 };
         this.ripples = [];
         this.cinematic = false;
-        // 灯光氛围（情绪）：主光颜色 + 曝光，平滑过渡
+        // 灯光氛围（情绪）：主光颜色 + 曝光，平滑过渡。
+        // dream：过关的梦境里整块键盘暗下去（主光、曝光压低，逆光提亮），发光的东西才显出来
         this._light = {
             tint: new THREE.Color(1, 1, 1), tintGoal: new THREE.Color(1, 1, 1),
             exposure: 1.05, exposureGoal: 1.05, keyScale: 1, keyScaleGoal: 1,
+            dream: 0, dreamGoal: 0, dreamBright: 0,
         };
+        this.envBase = scene.environmentIntensity;
+
+        // 渐变：配色里的几种颜色从键盘左下铺到右上。soft = 静止的渐变；flow = 慢慢流动；off = 单色
+        this.gradient = new Gradient(["#ffffff"]);
+        this.gradientMode = "soft";
+        this._flow = { phase: 0, acc: 0 };
 
         this.path = new GlowPath(this, { radius: 0.05 });
         this.extraPaths = new Set();
         this.tickers = new Set();
+        // 外挂的"层"（深海模式）：每帧 update(dt) 返回要不要重画；post 不为空时由它来画（后期处理）
+        this.layers = new Set();
+        this.post = null;
+        // 灯光覆盖：深海模式要把主光压暗、逆光拉满，不让配色 / 情绪灯光每帧写回去
+        this.lightOverride = null;
 
         this._bindInput();
         this._resizeObs = new ResizeObserver(() => this._resize());
@@ -866,6 +1137,8 @@ export class KeyboardStage {
                 legendData: {},
                 legendDirty: true,
                 tint: null,
+                // 这颗键在渐变上的位置：左下 0 → 右上 1
+                gradT: Math.min(1, Math.max(0, (cx - 0.4 * cz + 1.8) / 17.1)),
             });
         });
 
@@ -932,15 +1205,18 @@ export class KeyboardStage {
             case: C(cw.case), plate: C(cw.plate), knob: C(cw.knob),
             glow: C(cw.glow), hemi: C(cw.highlight),
         };
+        this.gradient = new Gradient(cw.grad || [cw.glow, cw.highlight, cw.accent]);
         this.keys.forEach((k) => {
             const role = k.spec.role;
-            k.baseGoal.set(role === "alpha" ? cw.alpha : role === "accent" ? cw.accent : cw.mod);
+            k.roleColor = C(role === "alpha" ? cw.alpha : role === "accent" ? cw.accent : cw.mod);
+            k.baseGoal.copy(this._capColor(k));
             k.legendColor = role === "alpha" ? cw.alphaLegend : role === "accent" ? cw.accentLegend : cw.modLegend;
-            if (!k.tint) k.glowColor.set(cw.glow);
+            if (!k.tint) k.glowColor.copy(this._defaultGlow(k));
             k.legendDirty = true;
             if (instant) k.base.copy(k.baseGoal);
         });
         this.path.setColor(cw.glow);
+        this.path.setGradient(this.gradientMode === "off" ? null : this.gradient);
         // 光环用强调色：黑白钢琴那套的底光是白的，白光环落在白键帽上就看不见了
         this.target.ring.material.color.set(cw.accent);
         this.target.ring.material.emissive.set(cw.accent);
@@ -955,11 +1231,73 @@ export class KeyboardStage {
         this._touch();
     }
 
+    // 渐变：soft（静止）/ flow（慢慢流动）/ off（单色，和以前一样）
+    setGradientMode(mode) {
+        const m = mode === "flow" || mode === "off" ? mode : "soft";
+        if (m === this.gradientMode) return;
+        this.gradientMode = m;
+        this.keys.forEach((k) => {
+            if (!k.tint) k.glowColor.copy(this._defaultGlow(k));
+            k.baseGoal.copy(this._capColor(k));
+            k._flowDirty = true;
+        });
+        this.path.setGradient(m === "off" ? null : this.gradient);
+        this._touch();
+    }
+
+    // 渐变上 t 处的颜色（CSS 十六进制）：界面上的徽标、走线序号跟 3D 里的颜色对得上
+    gradientColor(t) {
+        return this.gradientMode === "off" ? (this.colorway ? this.colorway.glow : "#ffffff") : this.gradient.css(t);
+    }
+
+    // 一颗键平时的底光颜色：渐变上它那个位置的颜色（流动时再加上相位）
+    _defaultGlow(k) {
+        if (this.gradientMode === "off" || !this.colorway) return new THREE.Color(this.colorway ? this.colorway.glow : "#ffffff");
+        return this.gradient.cycle(k.gradT * 0.92 + (this.gradientMode === "flow" ? this._flow.phase : 0));
+    }
+
+    // 键帽本身的颜色：配色里写了 gradCaps 的（流光、寰宇……），字母键也染上一层渐变
+    _capColor(k) {
+        const cw = this.colorway;
+        const amt = cw && cw.gradCaps && this.gradientMode !== "off" && k.spec.role === "alpha" ? cw.gradCaps : 0;
+        const c = (k._capTmp || (k._capTmp = new THREE.Color())).copy(k.roleColor || WHITE);
+        if (amt > 0) c.lerp(this._defaultGlow(k), amt);
+        return c;
+    }
+
+    // 流动：底光（和染色的键帽）慢慢换颜色。只有开了"流光"才每帧推，30fps 就够顺
+    _updateFlow(dt) {
+        if (this.gradientMode !== "flow" || this.reduced) return false;
+        const F = this._flow;
+        F.acc += dt;
+        if (F.acc < 1 / 30) return false;
+        F.phase += F.acc * 0.07;
+        F.acc = 0;
+        const tinted = this.colorway && this.colorway.gradCaps;
+        this.keys.forEach((k) => {
+            if (!k.tint) k.glowColor.copy(this._defaultGlow(k));
+            if (tinted && k.spec.role === "alpha") {
+                k.baseGoal.copy(this._capColor(k));
+                k.base.copy(k.baseGoal);
+            }
+            k._flowDirty = true;
+        });
+        return true;
+    }
+
     // 情绪的灯光：{ tint: 主光颜色, exposure: 曝光, key: 主光强度倍数 }
     setLighting({ tint = "#ffffff", exposure = 1.05, key = 1 } = {}) {
         this._light.tintGoal.set(tint);
         this._light.exposureGoal = exposure;
         this._light.keyScaleGoal = key;
+        this._touch();
+    }
+
+    // 梦境的暗场：0 = 平常，1 = 夜里（慢慢过渡过去）。
+    // bright：这套配色本身有多亮（0–1）。浅色的外壳 / 键帽要压得更深、逆光少给一点，不然边缘一圈高光会被泛光放大成一道白边
+    setDreamLight(v, { bright = 0 } = {}) {
+        this._light.dreamGoal = Math.max(0, Math.min(1, v));
+        if (v > 0) this._light.dreamBright = Math.max(0, Math.min(1, bright));
         this._touch();
     }
 
@@ -991,17 +1329,23 @@ export class KeyboardStage {
         this.knobMat.color.copy(n.knob);
         this.rim.color.copy(n.glow);
         this.hemi.color.copy(n.hemi).lerp(WHITE, 0.6);
+        let keyDiff = 0;
         this.keys.forEach((key) => {
-            diff = Math.max(diff, d3(key.base, key.baseGoal));
+            keyDiff = Math.max(keyDiff, d3(key.base, key.baseGoal));
             key.base.lerp(key.baseGoal, k);
         });
+        diff = Math.max(diff, keyDiff);
+        // 键帽颜色还在变（或者这一帧刚一步到位）：每颗键都得把新颜色写进材质，哪怕它别的什么都没变
+        if (keyDiff > 1e-6) this._cwDirty = true;
         // 情绪灯光
         const L = this._light;
         const kl = damp(dt, 2.5);
-        diff = Math.max(diff, d3(L.tint, L.tintGoal), Math.abs(L.exposure - L.exposureGoal), Math.abs(L.keyScale - L.keyScaleGoal));
+        diff = Math.max(diff, d3(L.tint, L.tintGoal), Math.abs(L.exposure - L.exposureGoal), Math.abs(L.keyScale - L.keyScaleGoal),
+            Math.abs(L.dream - L.dreamGoal));
         L.tint.lerp(L.tintGoal, kl);
         L.exposure += (L.exposureGoal - L.exposure) * kl;
         L.keyScale += (L.keyScaleGoal - L.keyScale) * kl;
+        L.dream += (L.dreamGoal - L.dream) * damp(dt, 3);
         if (diff < 0.004) {
             // 已经看不出差别了：一步到位，不再每帧重画
             ["case", "plate", "knob", "glow", "hemi"].forEach((f) => n[f].copy(g[f]));
@@ -1009,10 +1353,24 @@ export class KeyboardStage {
             L.tint.copy(L.tintGoal);
             L.exposure = L.exposureGoal;
             L.keyScale = L.keyScaleGoal;
+            L.dream = L.dreamGoal;
         }
-        this.keyLight.color.copy(L.tint);
-        this.keyLight.intensity = 3.4 * L.keyScale;
-        this.renderer.toneMappingExposure = L.exposure;
+        const ov = this.lightOverride;
+        const d = ov ? 0 : L.dream;
+        const b = L.dreamBright;
+        this.keyLight.color.copy(ov && ov.keyColor ? ov.keyColor : L.tint);
+        this.keyLight.intensity = (ov ? ov.key : 3.4) * L.keyScale * (1 - (0.62 + 0.15 * b) * d);
+        this.renderer.toneMappingExposure = ov ? ov.exposure : L.exposure * (1 - (0.26 + 0.16 * b) * d);
+        if (ov) {
+            this.rim.color.copy(ov.rimColor);
+            this.rim.intensity = ov.rim;
+            this.hemi.color.copy(ov.hemiColor);
+            this.hemi.intensity = ov.hemi;
+        } else {
+            this.rim.intensity = 26 * (1 + 0.8 * d * (1 - b) - 0.35 * d * b);
+            this.hemi.intensity = 0.35 * (1 - 0.55 * d);
+            this.scene.environmentIntensity = this.envBase * (1 - (0.6 + 0.2 * b) * d);
+        }
         return diff >= 0.004;
     }
 
@@ -1034,7 +1392,7 @@ export class KeyboardStage {
                 k.glowColor.set(state.glowColor);
             } else {
                 k.tint = null;
-                if (this.colorway) k.glowColor.set(this.colorway.glow);
+                if (this.colorway) k.glowColor.copy(this._defaultGlow(k));
             }
         }
     }
@@ -1151,9 +1509,9 @@ export class KeyboardStage {
     }
 
     // 游戏里的走线
-    setPath(ids, opts) {
+    setPath(ids, opts = {}) {
         const pts = ids.map((id) => this.keyTop(id)).filter(Boolean);
-        this.path.setPoints(pts, opts);
+        this.path.setPoints(pts, { span: ids.length, ...opts });
     }
 
     pulsePath() {
@@ -1381,6 +1739,7 @@ export class KeyboardStage {
         this.pixelRatio = Math.min(this.maxPixelRatio, this._prLimit || this.maxPixelRatio);
         this.renderer.setPixelRatio(this.pixelRatio);
         this.renderer.setSize(w, h, false);
+        if (this.post) this.post.setSize(this.drawingSize());
         this.camera.aspect = this.aspect;
         this.camera.updateProjectionMatrix();
         this._computeGoal();
@@ -1421,6 +1780,7 @@ export class KeyboardStage {
         this._prLimit = this.pixelRatio;
         this.renderer.setPixelRatio(this.pixelRatio);
         this.renderer.setSize(this.width, this.height, false);
+        if (this.post) this.post.setSize(this.drawingSize());
         this._touch();
     }
 
@@ -1463,6 +1823,7 @@ export class KeyboardStage {
         let busy = false;
         let moved = false;
         this.tickers.forEach((fn) => fn(dt, this.time));
+        if (this._updateFlow(dt)) busy = true;
         if (this._updateColorway(dt)) busy = true;
         const kr = this._updateKeys(dt);
         if (kr & 1) busy = true;
@@ -1478,6 +1839,9 @@ export class KeyboardStage {
             if (r & 2) moved = true;
         });
         if (this.towerTick(dt)) busy = true;
+        this.layers.forEach((l) => {
+            if (l.update(dt, this.time)) busy = true;
+        });
         if (this._updateCamera(dt)) busy = true;
         if (moved) this._shadowDirty = true;
         return busy;
@@ -1488,7 +1852,13 @@ export class KeyboardStage {
             this.renderer.shadowMap.needsUpdate = true;
             this._shadowDirty = false;
         }
-        this.renderer.render(this.scene, this.camera);
+        if (this.post) this.post.render(this.renderer, this.scene, this.camera);
+        else this.renderer.render(this.scene, this.camera);
+    }
+
+    // 画布的像素尺寸（后期处理的渲染目标要跟着它）
+    drawingSize() {
+        return { w: Math.round(this.width * this.pixelRatio), h: Math.round(this.height * this.pixelRatio) };
     }
 
     // 不走 rAF，直接把模拟往前推 seconds 秒再画一帧。
@@ -1520,7 +1890,8 @@ export class KeyboardStage {
         if (!k || this.reduced) return;
         this.ripples.push({
             x: k.group.position.x, z: k.group.position.z, t0: this.time,
-            color: new THREE.Color(color || (this.colorway ? this.colorway.glow : "#ffffff")),
+            // 不指定颜色：波扫过哪颗键就亮成那颗键自己的颜色（渐变配色下就是一道彩虹）
+            color: color ? new THREE.Color(color) : null,
             strength, speed, width, life,
         });
         if (this.ripples.length > 10) this.ripples.shift();
@@ -1554,7 +1925,9 @@ export class KeyboardStage {
                 Math.abs(t.glow - v.glow) + Math.abs(t.emissive - v.emissive) + Math.abs(t.legendGlow - v.legendGlow);
             const hoverGoal = k === this._hovered ? 1 : 0;
             const idle = delta < 2e-3 && Math.abs(hoverGoal - k.hover) < 2e-3 &&
-                k.popAt < 0 && k.shakeAt < 0 && k.flareAt < 0 && !k.pulse && !k.legendDirty && !ripples.length && !k._ringing;
+                k.popAt < 0 && k.shakeAt < 0 && k.flareAt < 0 && !k.pulse && !k.legendDirty && !ripples.length && !k._ringing &&
+                !k._flowDirty && !this._cwDirty;
+            k._flowDirty = false;
             // 这颗键什么都没变：跳过整段计算（大部分时候大部分键都是这样）
             if (idle) return;
             changed = true;
@@ -1604,7 +1977,7 @@ export class KeyboardStage {
                     const w = Math.exp(-((d - front) * (d - front)) / (r.width * r.width)) * fall * fall * r.strength;
                     if (w > wave) {
                         wave = w;
-                        waveColor = r.color;
+                        waveColor = r.color || k.glowColor;
                     }
                 }
             }
@@ -1637,6 +2010,7 @@ export class KeyboardStage {
 
             if (k.legendDirty) this._drawLegend(k);
         });
+        this._cwDirty = false;
         return (changed ? 1 : 0) | (moved ? 2 : 0);
     }
 
@@ -1802,14 +2176,20 @@ export class KeyboardStage {
         const floors = levels.map((lv, i) => {
             const pts = lv.ids.map((id) => this.keyTop(id, base + i * floorGap)).filter(Boolean);
             // 跳过的关卡：一层更细、更淡的虚影——线还在，只是那一层不是你亲手走的
-            const path = new GlowPath(this, { radius: lv.ghost ? 0.03 : 0.042, color: lv.color, shadow: true, ghost: !!lv.ghost });
-            path.setPoints(pts, { grow: false });
+            const path = new GlowPath(this, {
+                radius: lv.ghost ? 0.03 : 0.042, color: lv.color, shadow: true, ghost: !!lv.ghost,
+                gradient: lv.grad && this.gradientMode !== "off" ? new Gradient(lv.grad) : null,
+            });
+            path.setPoints(pts, { grow: false, span: pts.length });
             path.hideAll();
             this.extraPaths.add(path);
             // 每层底下一片淡淡的光：看得出"这是一层"
             const plate = this._floorPlate(pts, lv.color, pts.length ? pts[0].y - 0.02 : 0);
             group.add(plate.mesh);
-            return { path, pts, color: new THREE.Color(lv.color), plate };
+            const color = new THREE.Color(lv.color);
+            // 渐变的层：起点一种颜色、终点另一种，层与层之间的弧线就从上一层的尾色接到下一层的头色
+            const g = path.gradient;
+            return { path, pts, color, head: g ? g.color(0).clone() : color, tail: g ? g.color(1).clone() : color, plate };
         });
 
         const links = [];
@@ -1823,9 +2203,9 @@ export class KeyboardStage {
             const tubular = 48;
             const radial = 10;
             const geo = new THREE.TubeGeometry(curve, tubular, 0.036, radial, false);
-            // 弧线的颜色从上一层渐变到下一层
-            const cA = floors[i].color;
-            const cB = floors[i + 1].color;
+            // 弧线的颜色从上一层的尾巴渐变到下一层的开头
+            const cA = floors[i].tail;
+            const cB = floors[i + 1].head;
             const colors = [];
             const perRing = radial + 1;
             const tmpC = new THREE.Color();
@@ -1982,6 +2362,7 @@ export class KeyboardStage {
             this.extraPaths.delete(f.path);
             f.path.dispose();
             if (f.plate.mat) f.plate.mat.dispose();
+            if (f.plate.mesh.geometry) f.plate.mesh.geometry.dispose(); // 每层底下那块光板：以前漏了，每盖一次塔多占 14 份
         });
         T.links.forEach((l) => {
             l.geo.dispose();

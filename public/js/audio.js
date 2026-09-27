@@ -15,6 +15,8 @@
 // ============================================================
 
 const NOISE_SECONDS = 2;
+// 限幅器（DynamicsCompressorNode）固定的"预读"，实测 6 ms：整条混音都会晚这么多
+const LIMITER_LOOKAHEAD = 0.006;
 
 // ---------------- 乐器配方 ----------------
 // 公共字段：
@@ -208,7 +210,7 @@ export const INSTRUMENTS = {
     strings: {
         name: "弦乐", en: "Strings", colorway: "jiuhong", family: "吹奏 · 拉弦",
         octave: 0, decay: 0.9, sustain: 0.82, oneShot: 1.1, release: 0.6, reverb: 0.52, gain: 1,
-        attack: 0.22,
+        attack: 0.13,
         saws: { count: 3, detune: 14, g: 0.05, cutoff: 2800, cutoffEnd: 1900, cutoffTime: 1.2, q: 0.6 },
         vibrato: { rate: 5.2, cents: 11, delay: 0.35 },
         wide: 6,
@@ -253,7 +255,7 @@ export const INSTRUMENTS = {
     choir: {
         name: "人声", en: "Choir", colorway: "shengtang", family: "吹奏 · 拉弦",
         octave: 0, decay: 0.8, sustain: 0.9, oneShot: 1.2, release: 0.6, reverb: 0.6, gain: 1.1,
-        attack: 0.24,
+        attack: 0.13,
         saws: { count: 3, detune: 10, g: 0.06, cutoff: 4200, cutoffEnd: 4200, cutoffTime: 1, q: 0.4 },
         formants: [[800, 5, 1], [1150, 6, 0.6], [2900, 8, 0.28]],
         vibrato: { rate: 5.4, cents: 10, delay: 0.3 },
@@ -316,6 +318,22 @@ export const INSTRUMENTS = {
         tremolo: { rate: 4.8, depth: 0.1 },
     },
 
+    // ================= 关卡专用 =================
+    // 星河（第 14 关）：一口 FM 钟敲下去，后面晚半拍才涨起来两层很远的"人声"正弦，像星空里有人在唱
+    cosmos: {
+        name: "星河", en: "Galaxy", colorway: "huanyu", family: "合成",
+        octave: 0, decay: 3.2, decayPitch: 0.3, holdScale: 1.6, release: 1.0, reverb: 0.72, gain: 1,
+        attack: 0.004,
+        fm: [{ c: 1, m: 3.01, index: 1.3, indexEnd: 0.12, indexTime: 0.7, g: 0.075, d: 0.9 }],
+        partials: [
+            { r: 1, g: 0.035, wave: "sine", d: 1.2, attack: 0.28, detune: -5 },
+            { r: 2, g: 0.022, wave: "sine", d: 1.1, attack: 0.34, detune: 6 },
+            { r: 3, g: 0.008, wave: "sine", d: 0.9, attack: 0.4 },
+        ],
+        vibrato: { rate: 4.6, cents: 6, delay: 0.4 },
+        wide: 7,
+    },
+
     // 8-bit：游戏机的方波，起音先往上蹦一个五度——吃金币的那一声
     chip: {
         name: "8-bit", en: "Chiptune", colorway: "youxiji", family: "合成",
@@ -333,6 +351,19 @@ export const INSTRUMENT_BANKS = [
     ["guitar", "guzheng", "strings", "flute", "organ", "choir", "celesta", "steelpan", "bass", "pad", "accordion", "chip"],
 ];
 export const INSTRUMENT_ORDER = INSTRUMENT_BANKS.flat();
+
+// ---------------- 响度校准 ----------------
+// 同一个音量下每件乐器听起来一样响：用 soundcheck.html 离线渲染、按 ITU-R BS.1770 量出来的（LUFS）。
+// 量的是"一句旋律的整体响度 × 0.5 + 长音最响那 0.4 秒 × 0.3 + 快速点按最响那 0.4 秒 × 0.2"，
+// 对齐到二十四件的中位数。改了哪件乐器的配方，到声音检测页重新量一遍、把这里的数换掉
+export const LOUDNESS_TRIM = {
+    piano: 0.854, rhodes: 1.07, harp: 1.095, marimba: 1, musicbox: 1.026, vibes: 0.864,
+    handpan: 0.597, kalimba: 0.833, pluck: 1.03, ember: 1.074, aurora: 0.976, glass: 0.862,
+    guitar: 1.095, guzheng: 0.963, strings: 1.492, flute: 0.833, organ: 0.907, choir: 1.451,
+    celesta: 1.188, steelpan: 0.883, bass: 0.751, pad: 1.875, accordion: 1.077, chip: 1.195,
+    cosmos: 1.138,
+};
+Object.entries(LOUDNESS_TRIM).forEach(([id, v]) => { if (INSTRUMENTS[id]) INSTRUMENTS[id].level = v; });
 
 // ---------------- 效果链的几档预设 ----------------
 // 混响的几种空间：时长、亮度、早期反射
@@ -425,7 +456,8 @@ function satCurve(amount) {
 
 // ============================================================
 export class AudioEngine {
-    constructor() {
+    // context：传一个现成的（比如 OfflineAudioContext）就直接用它——声音检测页靠这个把乐器离线渲染出来量响度
+    constructor({ context = null } = {}) {
         this.ctx = null;
         this.volume = 0.9;
         this.muted = false;
@@ -436,13 +468,18 @@ export class AudioEngine {
         this.onState = null; // (state) => void：给界面用，Safari 切回来暂停时提示"点一下恢复"
         this._lastTime = 0;
         this._lastCheck = 0;
+        this.offline = !!context;
+        if (context) {
+            this.ctx = context;
+            this._build(context);
+        }
     }
 
     ensure() {
         if (this.ctx) {
             // Safari 切到别的标签页再回来，状态会变成 "interrupted"（WebKit 特有）或 "suspended"，
             // 以前只认 "suspended"，于是 Safari 回来就一直没声音
-            if (this.ctx.state !== "running") this._resume();
+            if (this.ctx.state !== "running" && !this.offline) this._resume();
             return this.ctx;
         }
         const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -469,7 +506,7 @@ export class AudioEngine {
     // 每次用户手势（点、按键）都调一下：Safari 只允许在手势里恢复音频
     unlock() {
         const ctx = this.ctx;
-        if (!ctx) return;
+        if (!ctx || this.offline) return;
         if (ctx.state !== "running") {
             this._resume();
             return;
@@ -527,7 +564,9 @@ export class AudioEngine {
         this.eqHigh = new BiquadFilterNode(ctx, { type: "highshelf", frequency: 6500, gain: 1.2 });
         this.satDry = new GainNode(ctx, { gain: 1 });
         this.satWet = new GainNode(ctx, { gain: 0 });
-        this.shaper = new WaveShaperNode(ctx, { curve: satCurve(0.4), oversample: "2x" });
+        // 不开过采样：过采样会让这一路比并联的干声晚 ~3ms，两路一叠就成了梳状滤波（温暖 / 复古两档声音发空、发"相位"）。
+        // 这条曲线很温和、又只混进来两三成，混叠听不出来
+        this.shaper = new WaveShaperNode(ctx, { curve: satCurve(0.4), oversample: "none" });
         this.satOut = new GainNode(ctx, { gain: 1 });
         this.dry.connect(this.mix);
         this.mix.connect(this.eqLow).connect(this.eqMid).connect(this.eqHigh);
@@ -552,6 +591,9 @@ export class AudioEngine {
         });
         this.master = new GainNode(ctx, { gain: this.muted ? 0 : this.volume });
         merge.connect(limiter).connect(this.master).connect(ctx.destination);
+        // 声音检测：量"真正送到扬声器的那一路"。分析器只在被读的时候才算，平时不花力气
+        this.analyser = new AnalyserNode(ctx, { fftSize: 2048, smoothingTimeConstant: 0 });
+        this.master.connect(this.analyser);
 
         // 混响支路：切掉低频 → 预延迟 → 卷积（按空间大小切换，交叉淡化）→ 回到汇总
         this.verbCut = new BiquadFilterNode(ctx, { type: "highpass", frequency: 260 });
@@ -612,11 +654,62 @@ export class AudioEngine {
         [...this.voices].forEach((v) => v.release());
     }
 
+    // 从"排好一个音"到"耳朵听见"要多久（秒），分三段：
+    //   base     浏览器自己的音频缓冲（一般 3–12 ms）
+    //   output   系统和输出设备：外放、有线耳机一般 10–40 ms；蓝牙耳机常见 100–300 ms
+    //   limiter  混音链末尾的限幅器（DynamicsCompressor）规定要"往前看"6 ms
+    // 报不出 outputLatency 的浏览器（老 Safari）用 getOutputTimestamp 推一个
+    latency() {
+        const ctx = this.ctx;
+        if (!ctx || this.offline) return null;
+        const base = ctx.baseLatency || 0;
+        let output = ctx.outputLatency;
+        let source = "outputLatency";
+        if (!(output > 0) && ctx.getOutputTimestamp && ctx.state === "running") {
+            const ts = ctx.getOutputTimestamp();
+            if (ts && ts.performanceTime > 0) {
+                // 此刻正从扬声器出来的是 contextTime + 这段时间走过的；和 currentTime 差多少就是整条链路的延迟
+                const heard = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+                output = Math.max(0, ctx.currentTime - heard - base);
+                source = "timestamp";
+            }
+        }
+        if (!(output >= 0)) {
+            output = 0;
+            source = "unknown";
+        }
+        return { base, output, limiter: LIMITER_LOOKAHEAD, total: base + output + LIMITER_LOOKAHEAD, source };
+    }
+
+    // 此刻送到扬声器的电平：{ rms, peak }（dBFS）；还没建音频或被挂起时返回 null
+    meter() {
+        if (!this.analyser) return null;
+        const a = this.analyser;
+        const buf = this._meterBuf || (this._meterBuf = new Float32Array(a.fftSize));
+        a.getFloatTimeDomainData(buf);
+        let sum = 0;
+        let peak = 0;
+        for (let i = 0; i < buf.length; i++) {
+            const v = buf[i];
+            sum += v * v;
+            if (Math.abs(v) > peak) peak = Math.abs(v);
+        }
+        const db = (x) => (x > 1e-9 ? 20 * Math.log10(x) : -Infinity);
+        return { rms: db(Math.sqrt(sum / buf.length)), peak: db(peak), state: this.ctx.state };
+    }
+
     // ---------------- 效果 ----------------
     // fx: { reverb: off|room|hall|cathedral|plate, echo: 0..1, width: 0.6..1.8, bloom: 0..1, tone, cinematic }
     setFx(fx) {
         Object.assign(this.fx, fx);
         if (this.ctx) this._applyFx(false);
+    }
+
+    // 过关的梦境：音符后面临时拖一条很长、很亮的尾巴（0 = 恢复成风格面板里的设置）
+    setDreamTail(amount) {
+        if (amount === (this.dreamTail || 0)) return;
+        this.dreamTail = amount;
+        if (this.ctx && !this.offline) this._applyFx(false);
     }
 
     _applyFx(instant) {
@@ -636,8 +729,8 @@ export class AudioEngine {
         this.echoIn.gain.setTargetAtTime(echo > 0 ? 0.22 + echo * 0.2 : 0, t, k);
         this.echoFb.gain.setTargetAtTime(0.28 + echo * 0.24, t, k);
 
-        // 氛围长尾
-        const bloom = Math.max(f.bloom || 0, cine ? 0.7 : 0);
+        // 氛围长尾（过关的梦境里临时拉起来一截）
+        const bloom = Math.max(f.bloom || 0, cine ? 0.7 : 0, this.dreamTail || 0);
         if (bloom > 0 && !this.bloomVerb) {
             this.bloomVerb = new ConvolverNode(ctx, { buffer: makeReverb(ctx, { seconds: 6.5, bright: 0.95 }) });
             this.bloomCut.connect(this.bloomVerb).connect(this.bloomOut);
@@ -722,7 +815,8 @@ export class AudioEngine {
         // 声部内部的链路：各积木 → mix → [滤波] → [颤音] → 收尾总闸 → 声像 → 干声 + 各支路
         const nodes = [];
         const sources = [];
-        const mix = new GainNode(ctx, { gain: 1 });
+        // level：响度校准（见文件末尾的 LOUDNESS_TRIM），整件乐器一起放大缩小，不动它内部各部分的比例
+        const mix = new GainNode(ctx, { gain: P.level || 1 });
         nodes.push(mix);
         let tail = mix;
         if (P.filter) {
@@ -801,9 +895,12 @@ export class AudioEngine {
             return o;
         };
         const wide = P.wide || 0;
+        // 高过奈奎斯特频率（采样率的一半）的振荡器听不见，还会折回来变成刺耳的杂音：高音区的高次泛音直接不要
+        const nyq = ctx.sampleRate * 0.45;
 
         // ---- 加法泛音 ----
         (P.partials || []).forEach((p, i) => {
+            if (f * p.r * (P.blip && i === 0 ? Math.pow(2, P.blip.cents / 1200) : 1) > nyq) return;
             const o = osc(p.wave || "sine", f * p.r, (p.detune || 0) + (wide ? (i % 2 ? wide : -wide) : 0));
             if (P.blip && i === 0) {
                 o.frequency.setValueAtTime(f * p.r * Math.pow(2, P.blip.cents / 1200), t0);
@@ -818,19 +915,24 @@ export class AudioEngine {
 
         // ---- 调频 ----
         (P.fm || []).forEach((op) => {
+            if (f * op.c > nyq) return;
             const car = osc("sine", f * op.c);
-            const mod = osc("sine", f * op.m);
-            const dev = new GainNode(ctx, { gain: 0 });
             const fmod = f * op.m;
-            dev.gain.setValueAtTime(op.index * fmod, t0);
-            dev.gain.exponentialRampToValueAtTime(Math.max(0.01, op.indexEnd * fmod), t0 + op.indexTime * (hold ? 1.4 : 1));
-            mod.connect(dev).connect(car.frequency);
+            // 调制波本身超出奈奎斯特：只留载波（这么高的音，调制出来的边带也都听不见了）
+            if (fmod <= nyq) {
+                const mod = osc("sine", fmod);
+                const dev = new GainNode(ctx, { gain: 0 });
+                dev.gain.setValueAtTime(op.index * fmod, t0);
+                dev.gain.exponentialRampToValueAtTime(Math.max(0.01, op.indexEnd * fmod), t0 + op.indexTime * (hold ? 1.4 : 1));
+                mod.connect(dev).connect(car.frequency);
+                mod.start(t0);
+                nodes.push(dev);
+            }
             const g = new GainNode(ctx, { gain: 0 });
             env(g, op.g * tilt, decay * (op.d || 1), P.attack || 0.005, P.curve);
             car.connect(g).connect(mix);
             car.start(t0);
-            mod.start(t0);
-            nodes.push(dev, g);
+            nodes.push(g);
         });
 
         // ---- 钢琴：拉伸泛音 + 双弦 ----
@@ -1235,6 +1337,39 @@ export class AudioEngine {
         src.start(t, Math.random() * 1.5, 0.05);
     }
 
+    // 水下的一个小气泡"啵"：正弦从低往高一滑，很短
+    _bloop(out, t, { gain = 0.02, pan = 0, f0 = 260 + Math.random() * 260 } = {}) {
+        const ctx = this.ctx;
+        const o = new OscillatorNode(ctx, { type: "sine", frequency: f0 });
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.exponentialRampToValueAtTime(f0 * (2.4 + Math.random() * 1.4), t + 0.05 + Math.random() * 0.03);
+        const g = new GainNode(ctx, { gain: 0 });
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(gain, t + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+        const p = new StereoPannerNode(ctx, { pan: Math.max(-1, Math.min(1, pan)) });
+        o.connect(g).connect(p).connect(out);
+        o.start(t);
+        o.stop(t + 0.12);
+        return p;
+    }
+
+    // 深海模式里按一个键："气泡机"跟着冒一串泡，轻轻的
+    bubbles({ pan = 0, amount = 1 } = {}) {
+        const ctx = this.ctx;
+        if (!ctx || this.muted) return;
+        const t0 = ctx.currentTime;
+        const n = 2 + Math.round(Math.random() * 3 * amount);
+        for (let i = 0; i < n; i++) {
+            const p = this._bloop(this.dry, t0 + 0.03 + i * (0.04 + Math.random() * 0.07), {
+                gain: 0.006 + Math.random() * 0.01, pan: pan + (Math.random() - 0.5) * 0.4,
+            });
+            const send = new GainNode(ctx, { gain: 0.6 });
+            p.connect(send).connect(this.reverbIn);
+            setTimeout(() => { try { send.disconnect(); } catch (err) { /* 已断 */ } }, 800);
+        }
+    }
+
     _swell(bed, { freq = 400, dur = 3, gain = 0.03, q = 1 } = {}) {
         // 一次远远经过的声音（车、雷、风）：带通噪声慢起慢落，顺便从一边移到另一边
         const ctx = this.ctx;
@@ -1297,6 +1432,17 @@ const AMBIENCES = {
     love(eng, ctx, bed) {
         eng._ambPad(bed, [174.61, 220, 261.63, 329.63, 392], { gain: 0.01, cutoff: 1400, breathe: 0.08 });
         eng._ambNoise(bed, "pink", { type: "bandpass", freq: 900, q: 0.5, gain: 0.008 });
+    },
+    // 深海：很低的水压轰鸣 + 一个几乎听不见的低音持续音 + 远处偶尔冒上去的气泡
+    abyss(eng, ctx, bed) {
+        eng._ambNoise(bed, "brown", { freq: 150, gain: 0.22, lfo: { rate: 0.05, depth: 0.1 } });
+        eng._ambNoise(bed, "pink", { type: "bandpass", freq: 420, q: 0.6, gain: 0.012, lfo: { rate: 0.08, depth: 0.01 } });
+        eng._ambPad(bed, [55, 82.41, 110], { gain: 0.012, cutoff: 240, breathe: 0.03 });
+        eng._ambEvery(bed, 700, 2400, () => {
+            const t = ctx.currentTime;
+            const n = 1 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < n; i++) eng._bloop(bed.out, t + i * 0.07, { gain: 0.012 + Math.random() * 0.012, pan: Math.random() * 1.6 - 0.8 });
+        });
     },
     // 冒险：低音的五度持续音 + 峡谷里的风 + 偶尔远处的一声闷雷
     adventure(eng, ctx, bed) {
