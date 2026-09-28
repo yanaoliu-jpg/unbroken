@@ -1,0 +1,33 @@
+# 每次推送到 main，把 public/ 整个发布到 GitHub Pages：https://yanaoliu-jpg.github.io/unbroken/
+# Pages 只放静态文件：键盘、关卡、音乐模式、深海、钢琴录音都能用；
+# AI 造句要 server.js 和 DeepSeek key，那里没有——页面会自己改用本地词库拼句子
+name: 发布到 GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v5

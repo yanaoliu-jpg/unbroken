@@ -7,13 +7,16 @@
 
 ## 0. 一句话现状
 
-最近一轮用户提的 7 件事（第 3 节），代码都写完了、在无头 Chrome 里测过了，
-**2026-09-28 按用户要求和上一轮的改动一起推送到了 `main`**（`git log` 第一条）。
+**最新一轮（2026-09-28，已推送到 `main`）**：音乐模式的钢琴换成了**真钢琴录音**（Salamander Grand Piano），
+加了四档力度、触键档位、松键声、踏板声、琴房卷积、加载进度。见第 2.5 节。
+推送时按用户要求加了**在线版**：GitHub Pages，https://yanaoliu-jpg.github.io/unbroken/（见第 1 节"仓库"）。
 
-**下一件要做的事**（用户推送前刚提的，还没动手）：**每一关都要风格化——键盘颜色、背景颜色、流动的线条，每关都不一样**。见第 5 节第 1 条。
+再往前那一轮（第 3 节）也已推送（`git log` 第二条）。
 
-⚠️ `server.js` 这一轮改了（压缩 + 缓存），**要用户自己重启一下服务**才生效（不重启也能正常玩，只是没有压缩）。
-仓库是**公开**的，推上去就等于发布。
+**还没动手的事**：**每一关都要风格化——键盘颜色、背景颜色、流动的线条，每关都不一样**。见第 5 节第 1 条。
+
+⚠️ `server.js` 这两轮都改了（压缩 + 缓存；这一轮给 `samples/` 加了一天的缓存），**要用户自己重启一下服务**才生效（不重启也能正常玩）。
+仓库是**公开**的，推上去就等于发布；这一轮新增约 23MB 的 mp3（用户同意了下载进仓库）。
 
 ---
 
@@ -45,6 +48,9 @@
 - 地址：https://github.com/yanaoliu-jpg/unbroken ，分支 `main`，**公开**。
 - 最近一次推送：2026-09-28（上一轮 + 这一轮一起，`git log` 第一条）；再往前是 `eb580ff`。
 - 提交作者邮箱是 GitHub 的 noreply 地址。
+- **在线版**：https://yanaoliu-jpg.github.io/unbroken/ 。`.github/workflows/pages.yml` 在每次推送到 `main` 时把 `public/` 发布到 GitHub Pages
+  （Pages 的来源设成了 "GitHub Actions"）。在线版没有服务端：`/api/generate` 回 404 / 405 / 501 时 `script.js` 记下 `noServer`，
+  以后直接用本地词库拼句子（`localSentence`），不弹"AI 偷懒"按钮。DeepSeek key 只在本机 `.env`，在线版碰不到。
 
 **自测入口**：地址后面加 `?debug`，内部状态会挂到 `window.__ub` 上。常用的：
 - `stage`、`audio`、`state`、`style`
@@ -69,7 +75,36 @@
 
 ---
 
-## 3. 最近一轮做了什么（状态：已完成、已测、已推送）
+## 2.5 最新一轮：真钢琴录音（状态：已完成、已测、**未提交**）
+
+用户原话：钢琴要 "warm grand piano, rich harmonics, crystalline highs, deep resonant bass, delicate touch, long sustain,
+intimate close-mic recording, natural room ambience"；建议用 Salamander 采样（每隔小三度一个、playbackRate 补中间的音）、
+力度映射音量和音色、键盘没力度就按按键间隔 / 预设力度 ±5% 随机、松键 0.3–0.8 秒 release、空格延音踏板、加载完成前显示加载状态、
+ConvolverNode 轻量混响 wet 15–20%。"可以采纳也可以按自己的想法，达到效果就行"。
+
+- **采样**（`public/samples/piano/`，212 个 mp3、约 23MB，来源 https://tambien.github.io/Piano/audio/ ，CC BY 3.0，署名在那里的 README.txt 和主 README 末尾）：
+  30 个音 × 力度 v4 / v7 / v10 / v13、rel1–88（松键声）、pedalD1/2、pedalU1/2。44.1k 立体声、约 100kbps；C4 约 16 秒、A0 约 26 秒。
+- **`js/piano-samples.js`**（新）：按需取（优先级队列、3 路并行、失败重试一次、头三个都取不到就整套放弃 → 退回 `piano.js` 物理建模）、
+  用自己的 `OfflineAudioContext(44.1k)` 解码、在 Worker 里整理（`piano.js` 的 `splitSample`：找起音去开头空白；头 2.5 秒原样，
+  之后的余音半带滤波降到 22.05k，两段 60ms 线性交叉淡化——实测前 2.5 秒和原录音逐点一致、接缝处误差 -50dB、电平差 ≤ 0.02dB）。
+  内存预算 180MB（手机 72MB），LRU 扔最久没弹的（这一屏那批不扔）。一屏一档力度约 50–60MB。
+  - 表：`LOUD`（每个采样起音后 0.5 秒的 K 加权响度，离线用 ffmpeg + numpy 量的）、`TREND`（v10 的平滑走势，每个音往上对齐）、
+    `RETUNE`（sfz 里 Markus Fiedler 的重新校音，只用 60%，保留一点伸展调律）。
+  - 力度：引擎力度 1 = MIDI 76.5 = v10 的中点；选最近的一档；响度按 `TREND + 高音补 1/3 + 27·log10(m/76.5)` 算目标，减去这一档的 `LOUD` 得增益；
+    亮度按和这一档的力度差 0.22dB/单位 做高架（`tilt`）；比 v4 还轻再加低通。
+- **`audio.js`**：`play()` 里真钢琴走两段源（head + tail）→ 高架 → gate → **平衡**（`_balance`，不用 StereoPanner，见坑）→ 干声 + 各支路 + **琴房** `_room()`；
+  制音器 `damperOf`（两段：τ1 快收到余振 floor，再 τ2 慢收；F6 以上没有制音器）；`voice.keyUp()` 出松键声（踩着踏板也有），`release(t, {quiet})`；
+  `pedalNoise(down)`；`setSustain` 同时把琴房抬 2.3dB。`REAL_PIANO_GAIN = 0.56`、`ROOM_SEND = 0.28`、钢琴 `reverb` 0.32 → 0.2、`LOUDNESS_TRIM.piano = 0.673`。
+  `makeReverb` 加了 `seed`（琴房固定 seed 1723，每次打开都是同一间）。
+- **`script.js`**：触键 `TOUCHES`（轻柔 0.55 / 适中 1 / 有力 1.32，各自在一档录音的正中间，`mss-touch`）、`liveVelocity`（和弦 / 快速经过音 / 乐句开头 / 同音反复 + 慢漂移 + 抖动，总共 ±5% 左右）、
+  `songVelocity`（强拍 = 小节线后第一个音 `downbeat`）；`warmPiano` 带 `focus`（加载进度只算这批）；`syncPianoLoad`（乐器名下面的进度条，手机上顶替 "PIANO" 那一行）；
+  空闲 1.8 秒后预取 A 那一排；第 12 关、终局和弦也预取；makeHoldPlayer 松手先 `keyUp()` 再看踏板；涟漪强度跟力度。
+- **测过的**（无头 Chrome，静音）：加载（本机 0.3 秒全好；限速 300KB/s 进度 0→74% 约 8 秒）、按键 / 踏板 / 松踏板、力度分布、换触键、
+  404 退回合成钢琴、第 12 关、试听、深海、手机尺寸不溢出、LUFS（和中位数差 0.04dB）、琴房湿声（单独 15%，加默认大厅 17.5%）、频谱图（轻 → 重高次泛音明显变多，踏板和弦 9 秒还在）。
+- **没人听过**：Claude 听不到声音。可调的：`ROOM_SEND`、琴房的 `makeReverb` 参数、`damperOf` 三个数、`TOUCHES` 的三个力度、
+  `targetLoudness` 里的 27（力度的响度跨度）和 0.35（高音补多少）、`pickPiano` 里的 0.22（力度差补多少亮度）、松键声 -35dB、踏板声 +3dB。
+
+## 3. 上一轮做了什么（状态：已完成、已测、已推送）
 
 用户原话（2026-09-28）：
 1. 切换乐器的 3D 动画改成键盘上每个按键飘上去、变色、再飘下来（附了两张键帽离开轴体的参考图）；
@@ -217,10 +252,10 @@
      确认 14 关各有各的样子，并在 README 的"风格"一节说明"关卡始终保留自己的配色"。风格面板里"场景"那行的说明也要改。
 2. **要用户重启服务**：`server.js` 的压缩和缓存头才生效。
 3. **声音没人听过**：Claude 听不到声音。钢琴、混响、新环境声、按键小声响、"咔哒"只看了频谱、LUFS 和能量比，需要用户说好不好听。
-   可调的地方：钢琴 `piano.js`（`T60a`、`fc`、`comb`、敲击声和音板的量）、`REVERBS` 的 `wet`、`AMB_TRIM`。
+   可调的地方：钢琴见第 2.5 节最后一条（现在是真录音，`piano.js` 的物理建模只是退路）、`REVERBS` 的 `wet`、`AMB_TRIM`。
 4. **真机 GPU 没测**：无头 Chrome 用的是软件渲染。换乐器飘键帽（87 颗键每帧都在动，阴影图每帧重算）在用户 Mac 上顺不顺，还不知道。
 5. **Safari / iPhone 没测**：模块 Worker（Safari 15+）、`color-mix()`、`AudioBuffer` 构造函数（有退路）、`compileAsync`（没有就跳过预编）。
-6. **钢琴长音**：采样最长 7 秒左右（C4 约 5 秒，最后 30% 淡出）；踩着踏板的超长和弦会比真钢琴早一点消失。要更长就改 `pianoSeconds()`（多占内存）。
+6. **钢琴长音**：已解决——真录音本身就长（C4 约 16 秒、A0 约 26 秒，录到底噪为止）。`pianoSeconds()` 只管物理建模那条退路。
 7. `kb3d.js` 里 `setFlyCam` 现在没人用了（换乐器改成了叠环绕偏移），留着当通用接口。
 
 ---
@@ -239,7 +274,14 @@
 
 ---
 
-## 7. 这次推送包含的文件
+## 7. 推送包含的文件
+
+**最近一次推送（真钢琴录音这一轮 + 在线版）**：
+- 修改：`README.md`、`HANDOFF.md`、`server.js`、`public/index.html`、`public/style.css`、`public/script.js`、
+  `public/js/audio.js`、`piano.js`、`piano-worker.js`、`soundcheck.js`
+- 新增：`public/js/piano-samples.js`、`public/samples/piano/`（212 个 mp3 + README.txt，约 23MB）、`.github/workflows/pages.yml`
+
+**上一次推送（2026-09-28）**：
 
 - 修改：`README.md`、`server.js`、`public/index.html`、`public/style.css`、`public/script.js`、
   `public/js/abyss.js`、`audio.js`、`colorways.js`、`dream.js`、`kb3d.js`、`post.js`、`soundcheck.js`
@@ -281,6 +323,12 @@
 - 高音的泛音、FM 调制波可能超过奈奎斯特频率：新乐器要注意。
 - 改了乐器配方或效果链，到声音检测页重量 LUFS：`trim = 旧 trim × 10^((中位数 − 分数)/20)`，写进 `LOUDNESS_TRIM`。
 - 环境声里的鸟叫雨滴是 `setTimeout` 排的，离线渲染量不到：要现场录环境声总线再量。
+- **Salamander 有些音左右两路几乎反相**（AB 立体声话筒：C5 相关系数 -0.84、A3 -0.43）：`StereoPannerNode` 对立体声输入会把一路混进另一路，
+  基音被抵消。真钢琴一律走 `_balance`（ChannelSplitter → 左右各一个 Gain → Merger）。总线的"宽度"调窄时也会这样（那是用户自己选的）。
+- 声音检测里拿渲染结果和原录音逐点比时，**要绕开总线**（`eng.dry` 直接接 `ctx.destination`）：限幅器有 6ms 预读、还有常开的均衡，不绕开对不齐。
+- 随机生成的混响脉冲每个引擎都不一样，量 LUFS 会有 ±0.5dB 的抖动；琴房现在固定 seed，钢琴量 6 次标准差 0.1dB。
+  限幅器的软膝让响度对 trim 不是线性的，要迭代两三次。
+- `AudioBuffer.getChannelData()` 的内存不能直接转给 Worker：先拷一份再 transfer。
 
 ### 流程
 - **不要 push**，除非用户当轮明确要求。
@@ -304,8 +352,10 @@ public/js/kb3d.js            KeyboardStage：渲染循环、镜头、配色（ho
                              键帽飘起 startFloat、台阶 setTiers、正面字带、梦境暗场、铭牌、塔；GlowPath；Gradient
 public/js/audio.js           AudioEngine：26 份乐器配方、钢琴采样库、效果链（混响已修）、环境声（12 种）、
                              LOUDNESS_TRIM、AMB_TRIM、latency()、setSustain()、keyClicks()、bubbles({kind})
-public/js/piano.js           钢琴的物理建模合成（一个音 → 一段采样）
-public/js/piano-worker.js    在后台线程里调 piano.js
+public/js/piano-samples.js   真钢琴录音：按需取 / 解码 / 整理、力度选档、响度和亮度补偿、内存预算、加载状态
+public/js/piano.js           录音整理 splitSample（去开头空白、余音降采样）+ 物理建模钢琴（录音取不到时的退路）
+public/js/piano-worker.js    后台线程：split（整理录音）、render（物理建模）
+public/samples/piano/        Salamander 钢琴录音 212 个 mp3 + README.txt（来源、授权）
 public/js/colorways.js       40 套配色（含深海的四种水）+ LEVEL_COLORWAYS + HOME_COLORWAY
 public/js/motifs.js          配色 → 背景画（18 种画法）+ 空中粒子；Backdrop（带缓存）
 public/js/dream.js           Dream：后期、GPU 星尘、光环、光柱；prewarm()

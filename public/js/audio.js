@@ -15,6 +15,7 @@
 // ============================================================
 
 import { renderPianoNote, pianoGridNote, midiToFreq } from "./piano.js";
+import { requestPiano, pickPiano, pianoKeyNoise, pianoPedalNoise, pianoSamplesFailed, midiVelocity } from "./piano-samples.js";
 
 const NOISE_SECONDS = 2;
 // 限幅器（DynamicsCompressorNode）固定的"预读"，实测 6 ms：整条混音都会晚这么多
@@ -175,12 +176,14 @@ export const INSTRUMENTS = {
         wide: 5,
     },
 
-    // 钢琴：每个音是离线算好的一段采样（js/piano.js：非谐泛音、三根弦的拍频、两段衰减、击弦点、敲击声、音板共鸣）。
-    // 采样还没算好的那一两秒里，先用下面这套实时合成顶上：拉伸泛音 + 双弦 + 琴槌那一下。
-    // 松手是制音器落下：低音区的弦粗，要多停一会儿；F6 以上本来就没有制音器，松手也会自己响完
+    // 钢琴：真三角琴的录音（js/piano-samples.js：Salamander Grand Piano，四档力度、松键声、踏板声），
+    // 外加一间小琴房的卷积（_room），混响送得比别的乐器少一点——房间已经给了一层空气。
+    // 录音还没取到的那一两秒，先用下面这套实时合成顶上：拉伸泛音 + 双弦 + 琴槌那一下；
+    // 整套录音取不到（文件不在），退回 js/piano.js 的物理建模。
+    // 松手是制音器落下（damperOf）：低音区的弦粗，要多停一会儿；F6 以上本来就没有制音器，松手也会自己响完
     piano: {
         name: "钢琴", en: "Piano", colorway: "classic", family: "键盘",
-        octave: 0, decay: 3.4, decayPitch: 0.6, holdScale: 2.4, release: 0.3, reverb: 0.32, gain: 1,
+        octave: 0, decay: 3.4, decayPitch: 0.6, holdScale: 2.4, release: 0.3, reverb: 0.2, gain: 1,
         attack: 0.002,
         sampled: "piano", sampleGain: 0.62,
         piano: { n: 9, inharm: 0.00045, g: 0.11 },
@@ -377,9 +380,9 @@ export const INSTRUMENT_ORDER = INSTRUMENT_BANKS.flat();
 // 同一个音量下每件乐器听起来一样响：用 soundcheck.html 离线渲染、按 ITU-R BS.1770 量出来的（LUFS）。
 // 量的是"一句旋律的整体响度 × 0.5 + 长音最响那 0.4 秒 × 0.3 + 快速点按最响那 0.4 秒 × 0.2"，
 // 对齐到二十四件的中位数。改了哪件乐器的配方（或者效果链，比如混响的量），到声音检测页重新量一遍、把这里的数换掉。
-// 这一版是钢琴换成采样、混响修好之后重新量的
+// 这一版是钢琴换成采样、混响修好之后重新量的；钢琴换成真钢琴录音（加了琴房）之后又单独量了一次（其余乐器的中位数 -21.86 LUFS）
 export const LOUDNESS_TRIM = {
-    piano: 0.761, rhodes: 1.035, harp: 1.053, marimba: 1.062, musicbox: 0.978, vibes: 0.869,
+    piano: 0.673, rhodes: 1.035, harp: 1.053, marimba: 1.062, musicbox: 0.978, vibes: 0.869,
     handpan: 0.661, kalimba: 0.888, pluck: 1.058, ember: 1.128, aurora: 0.939, glass: 0.869,
     guitar: 1.051, guzheng: 0.924, strings: 1.481, flute: 0.815, organ: 0.912, choir: 1.358,
     celesta: 1.182, steelpan: 0.89, bass: 0.809, pad: 1.713, accordion: 1.088, chip: 1.261,
@@ -483,19 +486,40 @@ function loadPiano(midi) {
     return p;
 }
 
-// 提前把这些频率要用到的钢琴采样算好（音乐模式一进来、换成钢琴时调）。
-// 按传进来的顺序排队：最常弹的中间那个八度放前面，它们最先好
-export function preloadPiano(freqs) {
+// 提前把这些频率要用到的钢琴采样取好（音乐模式一进来、换成钢琴、换调换八度时调）。
+// 按传进来的顺序排队：最常弹的中间那个八度放前面，它们最先好。
+//   velocity  按这个力度去取对应那一档录音（触键档位）
+//   focus     这是眼下这一屏要弹的那一批：界面上的加载进度只算它们
+// 真钢琴的录音整套取不到时，退回物理建模：一个音一个音地算
+export function preloadPiano(freqs, { velocity = 1, focus = false } = {}) {
+    if (!pianoSamplesFailed()) {
+        return requestPiano(freqs.map((f) => 69 + 12 * Math.log2(f / 440)), { velocity, focus })
+            .then((ok) => (ok ? true : preloadModeled(freqs)));
+    }
+    return preloadModeled(freqs);
+}
+
+function preloadModeled(freqs) {
     const notes = [...new Set(freqs.map(pianoGridNote))];
     return Promise.all(notes.map((m) => loadPiano(m).catch(() => null)));
 }
 
-// 松手时制音器落下多久把弦压住（完整的收尾时长，时间常数是它的 1/4）：
-// 低音弦粗、压得慢；F6（1397Hz）以上没有制音器，松手也按自己的余音响完
-function damperTime(f) {
-    if (f >= 1397) return 3.2;
-    return Math.max(0.2, Math.min(1.2, 0.4 * Math.pow(261.63 / f, 0.45)));
+// 松手 = 制音器落下：毛毡压上琴弦，先是很快的一收（几十毫秒掉 20dB），剩一点点余振再慢慢没掉——
+// 整个收尾 0.3–0.9 秒，低音弦粗、压得慢，余振也长些。F6（MIDI 89）以上本来就没有制音器：返回 null，松手也按自己的余音响完
+function damperOf(f) {
+    const midi = 69 + 12 * Math.log2(f / 440);
+    if (midi >= 88.5) return null;
+    const at = (bass, mid, treble) => (midi <= 60
+        ? bass + (mid - bass) * Math.max(0, (midi - 21) / 39)
+        : mid + (treble - mid) * Math.min(1, (midi - 60) / 28));
+    return { tau1: at(0.11, 0.055, 0.04), floor: at(0.1, 0.05, 0.035), tau2: at(0.25, 0.12, 0.1) };
 }
+
+// 真钢琴录音的整体音量（每个音已经按 piano-samples.js 的响度表对齐过）；再往后是 LOUDNESS_TRIM
+const REAL_PIANO_GAIN = 0.56;
+// 琴房的送出量：量过（声音检测页离线渲染一句旋律）——只有琴房时湿声占钢琴总能量的 15%，
+// 再叠上默认的大厅混响一共 17.5%（录音贴着琴弦收，这点空气刚好；再多就糊了）
+const ROOM_SEND = 0.28;
 
 // ---------------- 工具 ----------------
 function makeNoise(ctx, seconds = NOISE_SECONDS, color = "white") {
@@ -527,7 +551,9 @@ function makeNoise(ctx, seconds = NOISE_SECONDS, color = "white") {
 // 最后每个声道的能量归一到 1，卷积器要关掉自动归一化（normalize: false）。
 // 自动归一化会按脉冲的长度把它整段往下压（大厅那一档实测被压了 33dB），以前的混响就是这么"没了"的：
 // 钢琴开大厅，混响声只比干声低……19dB，几乎听不见。现在湿声多大只看送出量 × wet，能算、能量
-function makeReverb(ctx, { seconds, bright, size = 1 }) {
+// seed：给了就用可复现的随机数（钢琴的琴房每次打开页面都是同一间，不会这次亮一点、下次闷一点）
+function makeReverb(ctx, { seconds, bright, size = 1, seed = 0 }) {
+    const random = seed ? seeded(seed) : Math.random;
     const sr = ctx.sampleRate;
     const len = Math.floor(sr * seconds);
     const buf = ctx.createBuffer(2, len, sr);
@@ -540,7 +566,7 @@ function makeReverb(ctx, { seconds, bright, size = 1 }) {
         for (let i = 0; i < len; i++) {
             const t = i / sr;
             const a = bright - (bright - 0.1) * Math.min(1, t / seconds); // 越往后越暗
-            lp += a * ((Math.random() * 2 - 1) - lp);
+            lp += a * ((random() * 2 - 1) - lp);
             if (t < onset) continue;
             const rise = Math.min(1, (t - onset) / build);
             d[i] = lp * Math.exp((-6.9 * t) / seconds) * rise * rise;
@@ -550,8 +576,8 @@ function makeReverb(ctx, { seconds, bright, size = 1 }) {
             // 漫反射刚长满时每个采样大约 ±0.4，头一下反射是它的五六倍——真实房间里第一次反射就是这么突出
             const n = 11;
             for (let j = 0; j < n; j++) {
-                const t = (0.003 + Math.pow((j + Math.random() * 0.6) / n, 1.4) * 0.07) * size + (ch ? 0.0011 : 0);
-                const amp = 2.4 * Math.pow(1 - j / n, 1.2) * (0.75 + Math.random() * 0.25) * (Math.random() < 0.5 ? -1 : 1);
+                const t = (0.003 + Math.pow((j + random() * 0.6) / n, 1.4) * 0.07) * size + (ch ? 0.0011 : 0);
+                const amp = 2.4 * Math.pow(1 - j / n, 1.2) * (0.75 + random() * 0.25) * (random() < 0.5 ? -1 : 1);
                 const idx = Math.floor(t * sr);
                 // 反射面不是镜子：每一下抹成三个采样，没那么"咔"
                 [0.45, 1, 0.45].forEach((w, k) => { if (idx + k < len) d[idx + k] += amp * w; });
@@ -563,6 +589,17 @@ function makeReverb(ctx, { seconds, bright, size = 1 }) {
         for (let i = 0; i < len; i++) d[i] *= k;
     }
     return buf;
+}
+
+// 可复现的随机数（mulberry32）
+function seeded(seed) {
+    let a = seed >>> 0;
+    return () => {
+        a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
 }
 
 // 不做自动归一化的卷积器。构造参数里叫 disableNormalization（没有 normalize 这个选项，写了也会被忽略）；
@@ -688,6 +725,7 @@ export class AudioEngine {
         this.noise = makeNoise(ctx, NOISE_SECONDS, "white");
         this.ksCache.clear();
         this.verbs = {};
+        this.roomIn = null; // 琴房第一次弹钢琴时才建（_room）
 
         // 所有声部汇到 dry；送混响、送回声、送"氛围长尾"各一条支路
         this.dry = new GainNode(ctx, { gain: 1 });
@@ -846,11 +884,13 @@ export class AudioEngine {
     }
 
     // 延音踏板踩下：真钢琴的制音器全部抬起，没弹的弦也跟着共鸣，声音一下子"开"了。
-    // 这里用混响送出量整体抬 2.6dB 来模拟（松开踏板慢慢回去）
+    // 这里用混响送出量整体抬 2.6dB、琴房抬 2.3dB 来模拟（松开踏板慢慢回去）
     setSustain(on) {
         this.sustainOn = !!on;
         if (!this.ctx || this.offline) return;
-        this.reverbIn.gain.setTargetAtTime(on ? 1.35 : 1, this.ctx.currentTime, on ? 0.15 : 0.4);
+        const t = this.ctx.currentTime;
+        this.reverbIn.gain.setTargetAtTime(on ? 1.35 : 1, t, on ? 0.15 : 0.4);
+        if (this.roomIn) this.roomIn.gain.setTargetAtTime(ROOM_SEND * (on ? 1.3 : 1), t, on ? 0.15 : 0.4);
     }
 
     // 过关的梦境：音符后面临时拖一条很长、很亮的尾巴（0 = 恢复成风格面板里的设置）
@@ -960,14 +1000,20 @@ export class AudioEngine {
             : P.decay * Math.pow(440 / f, P.decayPitch || 0) * (hold ? P.holdScale : length);
         const tilt = pitchTilt(f) * (P.gain || 1) * velocity;
 
-        // 采样的乐器（钢琴）：这个音的采样算好了就直接放；还没好（刚打开页面的头一两秒）先用实时合成顶上，顺手去要
+        // 钢琴：真钢琴的录音在手就直接放（real）；还没取到（刚打开页面的头一两秒）先用实时合成顶上，顺手去要。
+        // 整套录音取不到时才用物理建模算出来的那一套
         let smp = null;
         if (P.sampled === "piano" && !this.noSamples) {
-            const m = pianoGridNote(f);
-            const buf = pianoBank.get(m);
-            if (buf) smp = { buffer: buf, rate: f / midiToFreq(m) };
-            else loadPiano(m).catch(() => {});
+            const pick = pickPiano(f, velocity);
+            if (pick) smp = { ...pick, real: true };
+            else if (pianoSamplesFailed()) {
+                const m = pianoGridNote(f);
+                const buf = pianoBank.get(m);
+                if (buf) smp = { buffer: buf, rate: f / midiToFreq(m) };
+                else loadPiano(m).catch(() => {});
+            }
         }
+        const real = !!(smp && smp.real);
         // 会一直响的乐器单发时：响 oneShot 秒再收；采样的单发音响到"原来那条衰减"的长度再落制音器
         const relAt = sustained && !hold ? t0 + (P.oneShot || 0.9) * length : smp && !hold ? t0 + decay : null;
 
@@ -985,8 +1031,20 @@ export class AudioEngine {
             tail = flt;
             nodes.push(flt);
         }
-        if (smp && velocity < 0.95) {
-            // 采样是按"中强"敲的：弹得轻，高频要少——真钢琴轻敲时琴槌接触得软，泛音本来就少
+        if (real) {
+            // 力度的音色：比这一档录音的力道重，高频提一点；轻，压一点（高架）——同一档里也是越轻越暗，接到相邻那档时亮度是连着的
+            const shelf = new BiquadFilterNode(ctx, { type: "highshelf", frequency: smp.tiltFreq, gain: smp.tilt });
+            tail.connect(shelf);
+            tail = shelf;
+            nodes.push(shelf);
+            if (smp.soft) {
+                const lp = new BiquadFilterNode(ctx, { type: "lowpass", frequency: smp.soft, Q: 0.5 });
+                tail.connect(lp);
+                tail = lp;
+                nodes.push(lp);
+            }
+        } else if (smp && velocity < 0.95) {
+            // 物理建模的采样是按"中强"算的：弹得轻，高频要少——真钢琴轻敲时琴槌接触得软，泛音本来就少
             const flt = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 700 + 13000 * Math.pow(velocity, 2.2), Q: 0.5 });
             tail.connect(flt);
             tail = flt;
@@ -1004,16 +1062,27 @@ export class AudioEngine {
             nodes.push(trem, depth);
         }
         const gate = new GainNode(ctx, { gain: 1 });
-        const panner = new StereoPannerNode(ctx, { pan: Math.max(-1, Math.min(1, pan)) });
-        tail.connect(gate).connect(panner);
-        panner.connect(this.dry);
+        // 声像。真钢琴的录音本身是立体声（低音偏左、高音偏右），有的音左右两路几乎反相（C5 的相关系数 -0.84）：
+        // StereoPanner 会把一路混进另一路，这些音的基音就被抵消掉一截。所以真钢琴改成只调左右各自的音量（平衡），不混
+        let panIn;
+        let panOut;
+        if (real) {
+            ({ input: panIn, output: panOut } = this._balance(pan * 0.7, nodes));
+        } else {
+            panIn = panOut = new StereoPannerNode(ctx, { pan: Math.max(-1, Math.min(1, pan)) });
+            nodes.push(panIn);
+        }
+        tail.connect(gate).connect(panIn);
+        panOut.connect(this.dry);
         const send = new GainNode(ctx, { gain: P.reverb || 0 });
-        panner.connect(send).connect(this.reverbIn);
+        panOut.connect(send).connect(this.reverbIn);
         const echoSend = new GainNode(ctx, { gain: 0.7 });
-        panner.connect(echoSend).connect(this.echoIn);
+        panOut.connect(echoSend).connect(this.echoIn);
         const bloomSend = new GainNode(ctx, { gain: 0.8 });
-        panner.connect(bloomSend).connect(this.bloomIn);
-        nodes.push(gate, panner, send, echoSend, bloomSend);
+        panOut.connect(bloomSend).connect(this.bloomIn);
+        // 钢琴（不管是录音还是顶上的合成）都进琴房
+        if (P.sampled === "piano") panOut.connect(this._room());
+        nodes.push(gate, send, echoSend, bloomSend);
 
         let end = t0 + 0.05;
         // 包络：衰减型 = 起音后一路往 0 走；持续型 = 起音 → 落到持续电平 → 一直保持到松手
@@ -1101,8 +1170,26 @@ export class AudioEngine {
             nodes.push(g);
         });
 
-        // ---- 采样 ----
-        if (smp) {
+        // ---- 真钢琴的录音：前 2.5 秒一段、余音一段（半采样率），在接缝处各自淡入淡出，加起来就是原来的录音 ----
+        if (real) {
+            const g = new GainNode(ctx, { gain: REAL_PIANO_GAIN * smp.gain });
+            const head = new AudioBufferSourceNode(ctx, { buffer: smp.head, playbackRate: smp.rate });
+            head.connect(g);
+            head.start(t0);
+            sources.push(head);
+            let dur = smp.head.duration;
+            if (smp.tail) {
+                const rest = new AudioBufferSourceNode(ctx, { buffer: smp.tail, playbackRate: smp.rate });
+                rest.connect(g);
+                rest.start(t0 + smp.split / smp.rate);
+                sources.push(rest);
+                dur = smp.split + smp.tail.duration;
+            }
+            g.connect(mix);
+            nodes.push(g);
+            end = Math.max(end, t0 + dur / smp.rate);
+        } else if (smp) {
+            // ---- 物理建模算出来的采样（退路）----
             const src = new AudioBufferSourceNode(ctx, { buffer: smp.buffer, playbackRate: smp.rate });
             const g = new GainNode(ctx, { gain: (P.sampleGain || 1) * tilt });
             src.connect(g).connect(mix);
@@ -1260,14 +1347,44 @@ export class AudioEngine {
         sentinel.start(t0);
         sources.push(sentinel);
 
-        // 采样钢琴的收尾就是制音器：按音高算（见 damperTime）
-        const rel = smp ? damperTime(f) : P.release || 0.25;
+        // 钢琴的收尾就是制音器（damperOf：两段，先快后慢）；F6 以上没有制音器，按自己的余音 3 秒左右慢慢收
+        const damp = smp ? damperOf(f) : null;
+        const rel = smp ? 3.2 : P.release || 0.25;
+        const fade = (t) => {
+            if (damp) {
+                gate.gain.setTargetAtTime(damp.floor, t, damp.tau1);
+                gate.gain.setTargetAtTime(0, t + 3 * damp.tau1, damp.tau2);
+                stopAll(t + 3 * damp.tau1 + 7 * damp.tau2);
+            } else {
+                gate.gain.setTargetAtTime(0, t, rel / 4);
+                stopAll(t + rel + 0.05);
+            }
+        };
+        // 手抬起来那一下的声音：真钢琴用录下来的松键声（键回弹、琴槌落回去），力度越大越清楚；
+        // 合成的钢琴用一下很轻的毛毡"噗"。踩着踏板松手也有——键照样弹回来，只是制音器没落下
+        let keyed = false;
+        const keyNoise = (t) => {
+            if (keyed || !smp) return;
+            keyed = true;
+            const buf = real ? pianoKeyNoise(f) : null;
+            if (buf) {
+                const kv = midiVelocity(velocity) / 127;
+                const level = REAL_PIANO_GAIN * (P.level || 1) * 0.0178 * (0.18 + 0.82 * kv * kv); // -35dB
+                this._keyNoise(buf, t, voice.done ? this.dry : panIn, level);
+            } else if (!real && f < 1397 && t < end - 0.2 && !voice.done) {
+                this._damperThud(t, panIn, 0.004 * tilt * (P.level || 1));
+            }
+        };
         const voice = {
             t0,
             hold,
             released: false,
+            done: false,
             end,
-            release: (time) => {
+            // 手松开了（踏板可能还踩着）：只出松键声，音接着响
+            keyUp: (time) => keyNoise(Math.max(ctx.currentTime, time || 0)),
+            // 真正收掉：制音器落下。quiet = 声部太多被挤掉的，不要松键声
+            release: (time, { quiet = false } = {}) => {
                 if (voice.released) return;
                 voice.released = true;
                 this.voices.delete(voice);
@@ -1275,10 +1392,8 @@ export class AudioEngine {
                 // 从当前音量接着往下收，松手瞬间才不会咔哒一声
                 gate.gain.cancelScheduledValues(t);
                 gate.gain.setValueAtTime(gate.gain.value, t);
-                gate.gain.setTargetAtTime(0, t, rel / 4);
-                // 制音器的毛毡落到弦上那一下轻轻的"噗"（弦还在响的时候才有）
-                if (smp && f < 1397 && t < end - 0.2) this._damperThud(t, panner, 0.004 * tilt * (P.level || 1));
-                stopAll(t + rel + 0.05);
+                if (!quiet) keyNoise(t);
+                fade(t);
             },
         };
         let stopped = false;
@@ -1291,15 +1406,15 @@ export class AudioEngine {
             });
         };
         sentinel.onended = () => {
+            voice.done = true;
             nodes.forEach((n) => { try { n.disconnect(); } catch (err) { /* 已断开 */ } });
             sources.forEach((s) => { try { s.disconnect(); } catch (err) { /* 已断开 */ } });
             this.voices.delete(voice);
         };
         if (relAt) {
-            // 持续型乐器的单发：到点自己松手
+            // 单发：到点自己松手（持续型乐器响 oneShot 秒；钢琴是制音器落下）
             gate.gain.setValueAtTime(1, relAt);
-            gate.gain.setTargetAtTime(0, relAt, rel / 4);
-            stopAll(relAt + rel + 0.05);
+            fade(relAt);
         } else {
             // 单发的音到时间自己停；按住的音也设一道保险丝，键卡住了也不会一直占着
             stopAll(hold ? t0 + Math.max(end - t0, 16) : end + 0.05);
@@ -1317,9 +1432,62 @@ export class AudioEngine {
                 }
             }
             victim = victim || this.voices.values().next().value;
-            if (victim) victim.release(ctx.currentTime);
+            if (victim) victim.release(ctx.currentTime, { quiet: true });
         }
         return voice;
+    }
+
+    // 平衡：左右两路各自调音量，不把一路混进另一路（真钢琴的立体声录音用；见 play 里声像那一段）
+    _balance(pan, nodes) {
+        const ctx = this.ctx;
+        const p = Math.max(-1, Math.min(1, pan));
+        const split = new ChannelSplitterNode(ctx, { numberOfOutputs: 2 });
+        const merge = new ChannelMergerNode(ctx, { numberOfInputs: 2 });
+        const gl = new GainNode(ctx, { gain: p > 0 ? Math.cos((p * Math.PI) / 2) : 1 });
+        const gr = new GainNode(ctx, { gain: p < 0 ? Math.cos((-p * Math.PI) / 2) : 1 });
+        split.connect(gl, 0).connect(merge, 0, 0);
+        split.connect(gr, 1).connect(merge, 0, 1);
+        nodes.push(split, gl, gr, merge);
+        return { input: split, output: merge };
+    }
+
+    // 琴房：录音是贴着琴弦收的，很干。加一层小房间的卷积（1.1 秒，早期反射密、高频先衰减），湿声大约占钢琴总能量的 15–20%——
+    // 琴像是摆在一间木地板的琴房里，而不是贴在耳朵上。风格面板里的混响（大厅、教堂……）照常叠在上面，钢琴那一路送得少一点
+    _room() {
+        if (this.roomIn) return this.roomIn;
+        const ctx = this.ctx;
+        this.roomIn = new GainNode(ctx, { gain: ROOM_SEND * (this.sustainOn ? 1.3 : 1) });
+        const cut = new BiquadFilterNode(ctx, { type: "highpass", frequency: 110, Q: 0.5 });
+        const conv = convolver(ctx, makeReverb(ctx, { seconds: 1.1, bright: 0.62, size: 0.5, seed: 1723 }));
+        this.roomIn.connect(cut).connect(conv).connect(this.mix);
+        return this.roomIn;
+    }
+
+    // 松键声：录音本身是立体声，接到这个声部的声像前面（跟着它偏左偏右）
+    _keyNoise(buf, t, out, level) {
+        const ctx = this.ctx;
+        const src = new AudioBufferSourceNode(ctx, { buffer: buf });
+        const g = new GainNode(ctx, { gain: level });
+        src.connect(g).connect(out);
+        src.start(t);
+        src.onended = () => { try { g.disconnect(); } catch (err) { /* 已断 */ } };
+    }
+
+    // 踏板本身的声音（只给真钢琴）：踩下去是所有制音器一起离开琴弦的那一声"嗡"，抬起来是一下轻轻的"咔"
+    pedalNoise(down) {
+        const ctx = this.ctx;
+        if (!ctx || this.muted) return;
+        const buf = pianoPedalNoise(down);
+        if (!buf) return;
+        const P = INSTRUMENTS.piano;
+        // 音量照录音作者的 sfz：踩 -20dB、抬 -19dB，再大 3dB（这是近距离收音的琴，机械声本来就听得见）
+        const src = new AudioBufferSourceNode(ctx, { buffer: buf });
+        const g = new GainNode(ctx, { gain: REAL_PIANO_GAIN * (P.level || 1) * Math.pow(10, ((down ? -20 : -19) + 3) / 20) });
+        src.connect(g);
+        g.connect(this.dry);
+        g.connect(this._room());
+        src.start(ctx.currentTime);
+        src.onended = () => { try { g.disconnect(); } catch (err) { /* 已断 */ } };
     }
 
     _damperThud(t, out, level) {
@@ -1335,11 +1503,12 @@ export class AudioEngine {
         src.onended = () => { try { g.disconnect(); } catch (err) { /* 已断 */ } };
     }
 
-    // 声音检测页离线渲染前调：这件乐器要用到的采样先算好（实时弹奏不用等：没好的音先用合成的顶上）
-    prepare(patchId, freqs) {
+    // 声音检测页离线渲染前调：这件乐器要用到的采样先取好（实时弹奏不用等：没好的音先用合成的顶上）。
+    // velocity：按哪个力度弹，就取哪一档录音
+    prepare(patchId, freqs, { velocity = 1 } = {}) {
         const P = INSTRUMENTS[patchId];
         if (!P || P.sampled !== "piano" || this.noSamples) return Promise.resolve();
-        return preloadPiano(freqs.map((f) => f * Math.pow(2, P.octave || 0)));
+        return preloadPiano(freqs.map((f) => f * Math.pow(2, P.octave || 0)), { velocity });
     }
 
     // Karplus-Strong：在延迟线里反复做"两点平均 × 损耗"，一段噪声就变成了一根弦

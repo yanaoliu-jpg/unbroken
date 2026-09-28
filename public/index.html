@@ -18,6 +18,7 @@
     <link rel="modulepreload" href="js/kb3d.js">
     <link rel="modulepreload" href="js/audio.js">
     <link rel="modulepreload" href="js/piano.js">
+    <link rel="modulepreload" href="js/piano-samples.js">
     <link rel="modulepreload" href="js/colorways.js">
     <link rel="modulepreload" href="js/abyss.js">
     <link rel="modulepreload" href="js/post.js">
@@ -257,6 +258,10 @@
                 <div class="music-title">
                     <span class="music-inst" id="music-inst">钢琴</span>
                     <span class="music-inst-en" id="music-inst-en">Piano</span>
+                    <!-- 真钢琴的录音按需去取：取的时候这里有一条细进度（还没到的音先用合成的钢琴顶上） -->
+                    <span class="piano-load" id="piano-load" role="status" aria-live="polite" hidden>
+                        <span class="pl-bar" aria-hidden="true"></span><span class="pl-text" id="piano-load-text"></span>
+                    </span>
                 </div>
                 <div class="key-ctl" role="group" aria-label="调和八度">
                     <button class="kc-btn" id="key-down" type="button" aria-label="降半音" title="降半音（←）">−</button>
@@ -280,8 +285,13 @@
                     <button type="button" class="bank-btn" data-bank="1">B 组</button>
                 </div>
                 <span class="inst-bank-hint">F1–F12 选乐器 · Caps Lock 换组</span>
-                <div class="cap-grad" id="cap-grad" role="group" aria-label="键帽配色">
-                    <span class="cg-k">键帽</span>
+                <div class="inst-opts">
+                    <div class="cap-grad touch-sel" id="touch-sel" role="group" aria-label="触键力度">
+                        <span class="cg-k">触键</span>
+                    </div>
+                    <div class="cap-grad" id="cap-grad" role="group" aria-label="键帽配色">
+                        <span class="cg-k">键帽</span>
+                    </div>
                 </div>
             </div>
             <div class="inst-row" id="inst-row" role="group" aria-label="乐器"></div>

@@ -10,14 +10,14 @@ app.disable('x-powered-by');
 
 // ---------- 静态文件：压缩 + 分两档缓存 ----------
 // 缓存：
-//   vendor/（three.js）、fonts/ 不会改：让浏览器存一天，过期后先用着旧的、后台再去确认（stale-while-revalidate）
+//   vendor/（three.js）、fonts/、samples/（钢琴录音，二十多 MB）不会改：让浏览器存一天，过期后先用着旧的、后台再去确认（stale-while-revalidate）
 //   自己写的 html / js / css：每次都回来确认一下有没有更新（没变就是一个 304，很便宜）——
 //   不然改了 js 之后浏览器可能还在用旧的模块，页面会报一些莫名其妙的错
 // 压缩：文本类文件第一次被要的时候压一份（brotli，不支持就 gzip），按"文件 + 修改时间"存在内存里，
 //   以后直接发压好的。three.module.js 1.3MB → 两百多 KB，第一次打开快很多。文件一改，修改时间变了就重压
 const PUBLIC = path.join(__dirname, 'public');
 const COMPRESSIBLE = /\.(js|mjs|css|html|json|svg|txt|map)$/i;
-const cacheControlFor = (rel) => (/^\/(vendor|fonts)\//.test(rel)
+const cacheControlFor = (rel) => (/^\/(vendor|fonts|samples)\//.test(rel)
     ? 'public, max-age=86400, stale-while-revalidate=604800'
     : 'no-cache');
 const packed = new Map();  // 文件|编码 → { mtime, size, buf, etag }

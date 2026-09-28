@@ -1384,7 +1384,50 @@ body.on-home:not(.past-hero) .brand {
     flex-wrap: wrap;
 }
 
-.music-title { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.music-title { position: relative; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+
+/* 真钢琴录音的加载进度：挂在乐器名下面，不占位置（取完说一声"就绪"就收起来） */
+.piano-load {
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 10px 3px 8px;
+    border-radius: 999px;
+    background: var(--glass);
+    border: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--ink-2);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: pl-in 220ms ease both;
+}
+.piano-load[hidden] { display: none; }
+.pl-bar {
+    position: relative;
+    width: 42px;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--line-2);
+    overflow: hidden;
+}
+.pl-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--p, 0%);
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--grad-a), var(--grad-c));
+    transition: width 240ms ease;
+}
+.piano-load.is-ready { color: var(--ink); }
+.piano-load.is-ready .pl-bar::after { width: 100%; }
+.piano-load.is-failed .pl-bar::after { width: 100%; background: var(--ink-3); }
+@keyframes pl-in { from { opacity: 0; translate: 0 -3px; } }
 
 .music-inst {
     font-size: 22px;
@@ -1528,12 +1571,14 @@ body.on-home:not(.past-hero) .brand {
 
 .inst-bank-hint { font-size: 12px; color: var(--ink-3); }
 
+/* 乐器那一行右边：触键力度、键帽配色 */
+.inst-opts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
 /* 键帽：原色 / 同色渐变 / 几组固定的渐变（音乐模式里，整块键盘铺一道） */
 .cap-grad {
     display: flex;
     align-items: center;
     gap: 3px;
-    margin-left: auto;
     padding: 3px;
     border-radius: 11px;
     background: var(--glass);
@@ -1572,6 +1617,17 @@ body.on-home:not(.past-hero) .brand {
 
 .cg-sw-off { background: linear-gradient(90deg, var(--alpha) 50%, var(--mod) 50%); }
 .cg-sw-follow { background: linear-gradient(90deg, var(--grad-a), var(--grad-b), var(--grad-c)); }
+
+/* 触键：三根高低不同的小竖条，亮几根就是几分力 */
+.tc-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; flex: none; }
+.tc-bars i { width: 3px; border-radius: 1px; background: var(--line-2); }
+.tc-bars i:nth-child(1) { height: 5px; }
+.tc-bars i:nth-child(2) { height: 8px; }
+.tc-bars i:nth-child(3) { height: 11px; }
+.tc-bars[data-n="1"] i:nth-child(-n+1),
+.tc-bars[data-n="2"] i:nth-child(-n+2),
+.tc-bars[data-n="3"] i:nth-child(-n+3) { background: currentColor; }
+.tc-btn:not(.on) .tc-bars { opacity: 0.7; }
 
 .score-box {
     padding: 18px 20px 20px;
@@ -2586,7 +2642,8 @@ body.cinematic .grade {
     .inst-bank-hint { display: none; }
     /* 键帽那一排放不下就另起一行，横着滑 */
     .inst-bar { flex-wrap: wrap; row-gap: 8px; }
-    .cap-grad { margin-left: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .inst-opts { margin-left: 0; max-width: 100%; flex-wrap: wrap; row-gap: 8px; }
+    .cap-grad { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
     .cap-grad::-webkit-scrollbar { display: none; }
     .sp-chips { grid-template-columns: repeat(3, 1fr); }
     .poster-quote { font-size: 110px; top: -34px; }
@@ -2595,6 +2652,9 @@ body.cinematic .grade {
     .stage-game { height: max(230px, 66vw); }
     .stage-music { height: max(210px, 58vw); }
     .music-title { order: -1; flex-basis: 100%; }
+    /* 手机上标题下面紧挨着就是返回、深海两颗按钮：加载进度改成顶替 "PIANO" 那一行，不压到按钮上、也不把下面往下推 */
+    .piano-load { top: auto; bottom: -4px; padding: 2px 6px; background: none; border: 0; font-size: 10.5px; }
+    .music-title.pl-on .music-inst-en { visibility: hidden; }
     /* 手机上页面左右只留 14px：乐器那一排的"出血"也只出 14px，不然整页会横着多出一截 */
     .inst-row { margin: 4px -14px 18px; padding: 6px 14px 10px; }
     .song-list { grid-template-columns: repeat(2, 1fr); }

@@ -47,8 +47,8 @@ export async function render(build, seconds, { sr = SR, fx = null } = {}) {
 export function renderPatch(patch, patternName = "phrase", opts = {}) {
     const P = PATTERNS[patternName];
     return render(async (eng) => {
-        // 采样的乐器（钢琴）：用到的采样先算好，不然离线渲染会用上"还没好时顶上的"那套合成音
-        await eng.prepare(patch, P.notes.map((n) => freqOfIdx(n.idx)));
+        // 采样的乐器（钢琴）：用到的录音先取好，不然离线渲染会用上"还没好时顶上的"那套合成音
+        await eng.prepare(patch, P.notes.map((n) => freqOfIdx(n.idx)), { velocity: opts.velocity || 1 });
         P.notes.forEach((n) => {
             const v = eng.play(patch, freqOfIdx(n.idx), { when: n.t, hold: true, velocity: opts.velocity || 1 });
             if (v) v.release(n.t + n.dur);

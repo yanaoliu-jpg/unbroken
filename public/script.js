@@ -11,6 +11,7 @@
 // ============================================================
 import { KeyboardStage, REGIONS } from "./js/kb3d.js";
 import { AudioEngine, INSTRUMENTS, INSTRUMENT_BANKS, preloadPiano } from "./js/audio.js";
+import { pianoStatus, onPianoStatus } from "./js/piano-samples.js";
 import { COLORWAYS, LEVEL_COLORWAYS, HOME_COLORWAY } from "./js/colorways.js";
 import { Abyss, ABYSS_TANK, ABYSS_THEMES, ABYSS_THEME_ORDER } from "./js/abyss.js";
 import { Dream } from "./js/dream.js";
@@ -300,7 +301,13 @@ function generateFixedWords(letterSequence) {
 }
 
 // ---------- AI 造句 ----------
+// 没有服务端的时候（放在 GitHub Pages 这种纯静态托管上）：接口回 404 / 405 / 501。
+// 记下来以后就不再去要了，直接用本地词库拼一句——过关页照常走，不弹"AI 偷懒"的按钮和一段 404 网页
+let noServer = false;
+const localSentence = (letterSequence) => "You are " + generateFixedWords(letterSequence).join(" · ");
+
 async function generateAISentence(letterSequence) {
+    if (noServer) return localSentence(letterSequence);
     // 服务端 20 秒就会放弃并给兜底句；这里多等 5 秒，再不回来就算失败（显示"再试一次"的按钮），不让过关页一直转圈
     const response = await fetch(API_ENDPOINT, {
         method: "POST",
@@ -308,6 +315,10 @@ async function generateAISentence(letterSequence) {
         body: JSON.stringify({ letters: letterSequence }),
         signal: AbortSignal.timeout ? AbortSignal.timeout(25000) : undefined,
     });
+    if ([404, 405, 501].includes(response.status)) {
+        noServer = true;
+        return localSentence(letterSequence);
+    }
     if (!response.ok) {
         const errText = await response.text();
         console.error("❌ [前端] HTTP 错误:", response.status, errText);
@@ -1365,6 +1376,8 @@ function setPedal(on) {
         if (!on) players.forEach((p) => p.liftPedal());
         document.body.classList.toggle("pedal-down", on);
         audio.setSustain(on);
+        // 弹的是钢琴：踏板本身也有声音（制音器一起离开琴弦的"嗡"、抬起来的"咔"）
+        if (currentScreen === "music" && musicPatch === "piano" && soundOn) audio.pedalNoise(on);
     }
     syncModifierUI();
 }
@@ -1401,6 +1414,8 @@ function makeHoldPlayer({ start, onHold, onRing }) {
         if (v.holders.size) return;
         delete voices[key];
         if (onHold) onHold(key, false);
+        // 键弹回来的那一下（钢琴有松键声）：踩不踩踏板都有
+        if (v.voice && v.voice.keyUp) v.voice.keyUp();
         if (pedalDown) {
             pedaled[key] = v;
             if (onRing) onRing(key, true);
@@ -3518,6 +3533,8 @@ function showFinal() {
     $("final-level-total").textContent = pad2(TOTAL_LEVELS);
     renderFinalMessage();
     showScreen("final");
+    // 塔盖完那一下的钢琴和弦：录音趁盖塔的这几秒先取好
+    preloadPiano(FINALE_CHORD, { velocity: 0.8 });
 }
 
 // 第 i 层离底板多高（和 kb3d 里 buildTower 的默认 base / floorGap 一致）
@@ -3613,8 +3630,9 @@ function floorMotif(level, path) {
 }
 
 // 收尾：钢琴铺开一个 C 大九和弦，极光在上面再亮三下
+const FINALE_CHORD = [65.41, 130.81, 196.0, 261.63, 329.63, 392.0, 587.33, 659.25];
 function finaleChord() {
-    const low = [65.41, 130.81, 196.0, 261.63, 329.63, 392.0, 587.33, 659.25];
+    const low = FINALE_CHORD;
     low.forEach((f, i) => {
         audio.play("piano", f, { when: i * 0.04, velocity: 0.8, length: 1.3, pan: (i / (low.length - 1) - 0.5) * 0.9 });
     });
@@ -3940,6 +3958,8 @@ function buildEvents(notes) {
         events.push({
             idx: n.idx, alter: n.alter || 0, key: n.key, start, beats: n.beats,
             first: i, last: i, indices: [i], slur: n.slur || 0, legato: false,
+            // 小节线后面的第一个音：强拍（试听时重一点）
+            downbeat: i > 0 && !!notes[i - 1].bar,
         });
     });
     for (let k = 0; k < events.length - 1; k++) {
@@ -4045,6 +4065,7 @@ function musicView() {
 
 function setupMusic() {
     if (musicPatch === "piano") warmPiano();
+    else syncPianoLoad();
     syncCapGradient();
     applyColorway(screenColorway());
     stage.resetKeys();
@@ -4205,6 +4226,7 @@ let musicAlter = 0;          // 生效值 = 物理按住 || 屏幕锁存
 let physicalAlter = 0;       // 按住 Shift / Option 的实时状态
 let latchedAlter = 0;        // 屏幕上点亮锁住的
 const musicKeyAlter = {};    // 每个正在响的键，按下那一刻用的升降（松手前不再改）
+const musicKeyVel = {};      // 每个键最近一次按下的力度（涟漪跟着它）
 
 function syncMusicAlter(e) {
     // 两个都按住时以升为准，不做双重升降
@@ -4222,11 +4244,130 @@ function applyAlter() {
     syncModifierUI();
 }
 
-// 钢琴的每个音是后台线程里算好的采样（一个音几十毫秒）：这一屏会弹到的音先排队去算，
-// 中间那个八度排最前——手最先落在那里。还没算好的音先用实时合成的钢琴顶上，不用等
+// 钢琴是真三角琴的录音（js/piano-samples.js），按需去取：这一屏会弹到的音、当前触键那一档先排队，
+// 中间那个八度排最前——手最先落在那里；带升降号的音排在后面。还没取到的音先用实时合成的钢琴顶上，第一下不会没声音
 function warmPiano() {
     const ids = GRID_IDS.slice().sort((a, b) => Math.abs(musicIndexOf(a) - 10) - Math.abs(musicIndexOf(b) - 10));
-    preloadPiano(ids.map((id) => musicFreqOf(musicIndexOf(id), 0)));
+    const freqs = ids.map((id) => musicFreqOf(musicIndexOf(id), 0));
+    ids.forEach((id) => freqs.push(musicFreqOf(musicIndexOf(id), 1), musicFreqOf(musicIndexOf(id), -1)));
+    preloadPiano(freqs, { velocity: touchBase(), focus: true });
+    syncPianoLoad();
+}
+
+// ---------- 钢琴录音的加载状态 ----------
+// 取的时候乐器名下面挂一条细细的进度，取完说一声"就绪"就收起来；本来就取好了的，什么都不显示
+const pianoLoadEl = $("piano-load");
+const pianoLoadText = $("piano-load-text");
+let pianoLoadShown = false;
+let pianoLoadTimer = 0;
+
+function syncPianoLoad(s = pianoStatus()) {
+    const here = currentScreen === "music" && musicPatch === "piano";
+    const loading = !s.failed && s.total > 0 && !s.ready;
+    const hide = () => {
+        pianoLoadEl.hidden = true;
+        pianoLoadEl.parentElement.classList.remove("pl-on");
+        pianoLoadShown = false;
+    };
+    if (!here || (!loading && !pianoLoadShown && !s.failed)) {
+        clearTimeout(pianoLoadTimer);
+        hide();
+        return;
+    }
+    const pct = s.total ? Math.round((s.done / s.total) * 100) : 100;
+    pianoLoadEl.style.setProperty("--p", `${pct}%`);
+    pianoLoadEl.classList.toggle("is-ready", !loading && !s.failed);
+    pianoLoadEl.classList.toggle("is-failed", s.failed);
+    pianoLoadText.textContent = s.failed ? "录音没取到 · 先用合成钢琴" : loading ? `真钢琴录音 ${pct}%` : "真钢琴 · 就绪";
+    if (pianoLoadEl.hidden) {
+        pianoLoadEl.hidden = false;
+        pianoLoadEl.parentElement.classList.add("pl-on");
+        pianoLoadShown = true;
+    }
+    clearTimeout(pianoLoadTimer);
+    if (!loading) pianoLoadTimer = setTimeout(hide, s.failed ? 4000 : 1600);
+}
+onPianoStatus((s) => syncPianoLoad(s));
+
+// ---------- 触键：力度 ----------
+// 电脑键盘没有力度感应，力度这样来：
+//   档位        轻柔 / 适中 / 有力 定一个基准。钢琴三档各自落在一档录音的正中间（v4 / v10 / v13）：轻的柔、暗，重的响、亮——
+//               不放在两档的交界上，不然下面那 ±5% 的起伏会让相邻两个音一会儿用这档录音、一会儿用那档
+//   手上的样子  几乎同时按下的（和弦）跟上一个音一样重；连得很快的经过音轻一点；停了一会儿再弹的第一个音重一点（乐句的开头）；
+//               同一个键连着敲，后一下轻一点
+//   一点随机    ±5% 以内：一半是前后相关的慢漂移（像手上的力道在走），一半是每个音自己的一点点抖动——同一个音连弹两下不会一模一样
+const TOUCHES = [
+    { id: "soft", name: "轻柔", v: 0.55, bars: 1, tip: "轻轻落指：声音柔、暗，余音更清楚" },
+    { id: "medium", name: "适中", v: 1, bars: 2, tip: "平常的力道" },
+    { id: "strong", name: "有力", v: 1.32, bars: 3, tip: "用力弹：更响、更亮，泛音多" },
+];
+let touchId = TOUCHES.some((t) => t.id === store.get("mss-touch")) ? store.get("mss-touch") : "medium";
+const touchBase = () => (TOUCHES.find((t) => t.id === touchId) || TOUCHES[1]).v;
+const feel = { at: -1e9, key: null, v: 1, drift: 0 };
+
+function liveVelocity(id) {
+    const now = performance.now();
+    const dt = now - feel.at;
+    feel.drift = feel.drift * 0.8 + (Math.random() - 0.5) * 0.03;
+    let v;
+    if (dt < 35) {
+        v = feel.v * (1 + (Math.random() - 0.5) * 0.02);
+    } else {
+        let k = 1;
+        if (dt < 170) k = 0.94;
+        else if (dt > 1400) k = 1.05;
+        if (id === feel.key && dt < 300) k *= 0.95;
+        v = touchBase() * k * (1 + feel.drift + (Math.random() - 0.5) * 0.04);
+    }
+    feel.at = now;
+    feel.key = id;
+    feel.v = v;
+    return v;
+}
+
+// 试听曲子：强拍重一点、圆滑线里轻一点、长音稍重、短的经过音稍轻，再加 ±3% 的随机
+function songVelocity(e) {
+    let k = 1;
+    if (e.downbeat) k *= 1.06;
+    if (e.legato) k *= 0.96;
+    if (e.beats >= 2) k *= 1.03;
+    else if (e.beats < 0.75) k *= 0.95;
+    return touchBase() * k * (1 + (Math.random() - 0.5) * 0.06);
+}
+
+function setTouch(id) {
+    if (!TOUCHES.some((t) => t.id === id)) return;
+    touchId = id;
+    store.set("mss-touch", id);
+    syncTouchRow();
+    if (musicPatch === "piano" && currentScreen === "music") warmPiano();
+    // 换上就用这个力道弹一下，耳朵马上知道轻重
+    if (currentScreen === "music" && soundOn) {
+        [7, 11].forEach((idx, i) => audio.play(musicPatch, musicFreqOf(idx, 0), { when: i * 0.12, velocity: touchBase(), length: 0.8 }));
+    }
+}
+
+function syncTouchRow() {
+    document.querySelectorAll("#touch-sel .tc-btn").forEach((b) => {
+        const on = b.dataset.touch === touchId;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", String(on));
+    });
+}
+
+function buildTouchRow() {
+    const el = $("touch-sel");
+    TOUCHES.forEach((t) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "cg-btn tc-btn";
+        b.dataset.touch = t.id;
+        b.title = t.tip;
+        b.innerHTML = `<span class="tc-bars" data-n="${t.bars}" aria-hidden="true"><i></i><i></i><i></i></span><span class="cg-name">${t.name}</span>`;
+        b.addEventListener("click", () => setTouch(t.id));
+        el.appendChild(b);
+    });
+    syncTouchRow();
 }
 
 // ---------- 调和八度 ----------
@@ -4325,6 +4466,7 @@ function setInstrument(id, { preview = false } = {}) {
         }
     });
     if (id === "piano" && currentScreen === "music") warmPiano();
+    else syncPianoLoad();
     // 用户亲手换的（点按钮、按 F 键）：整块键盘的键帽一道波似的飘起来、在空中换上新颜色、再落回轴上。
     // 连着快速换的时候（上一趟还没落完、或者刚落下一秒多）就不飘了，直接换
     const wasSwapping = !!swap;
@@ -4844,7 +4986,7 @@ function playSong() {
             // 普通音：留一点断口，连着的同音之间才听得出是两下
             const off = e.legato ? dur + 0.03 : Math.max(0.06, dur * 0.88);
             const v = audio.play(musicPatch, musicFreqOf(e.idx, e.alter), {
-                when: start - ctx.currentTime, hold: true, pan: e.key ? panOf(e.key) : 0, velocity: e.legato ? 0.92 : 1,
+                when: start - ctx.currentTime, hold: true, pan: e.key ? panOf(e.key) : 0, velocity: songVelocity(e),
             });
             if (v) {
                 playVoices.add(v);
@@ -4932,10 +5074,12 @@ const musicPlayer = makeHoldPlayer({
         // 按下那一刻的升降跟着这个音走到松手，中途放开 Shift 不改已经在响的音
         musicKeyAlter[id] = musicAlter;
         const f = musicFreqOf(idx, musicAlter);
+        const velocity = liveVelocity(id);
+        musicKeyVel[id] = velocity;
         // 先发声、再做画面：声音越早排进音频线程越跟手
-        const voice = audio.play(musicPatch, f, { hold: true, pan: panOf(id) });
+        const voice = audio.play(musicPatch, f, { hold: true, pan: panOf(id), velocity });
         if (abyssOn) {
-            abyss.noteOn(id, { velocity: 0.95, freq: f });
+            abyss.noteOn(id, { velocity: Math.min(1, 0.95 * velocity), freq: f });
             audio.bubbles({ pan: panOf(id), kind: ABYSS_THEMES[abyssPrefs.theme].noteFx });
         }
         return voice;
@@ -4944,7 +5088,8 @@ const musicPlayer = makeHoldPlayer({
         stage.press(id, on);
         if (on) {
             stage.flare(id);
-            stage.ripple(id, { strength: 0.55, speed: 9, life: 0.9 });
+            // 涟漪跟着力度：弹得重，荡得开
+            stage.ripple(id, { strength: 0.55 * Math.min(1.3, Math.max(0.6, musicKeyVel[id] || 1)), speed: 9, life: 0.9 });
             advanceFollow(id, musicKeyAlter[id] || 0);
             if (abyssOn) hideAbyssHint();
         } else {
@@ -5765,6 +5910,7 @@ function init() {
     buildKeySelect();
     buildInstRow();
     buildCapGradRow();
+    buildTouchRow();
     buildAbyssPanel();
     bindEvents();
 
@@ -5799,6 +5945,12 @@ if (stage) {
         dream.prewarm().then(() => (abyss ? abyss.prewarm() : null)).catch(() => {});
     };
     setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(warmGPU, { timeout: 4000 }) : warmGPU()), 2500);
+    // 音乐模式默认是钢琴：空闲时先把中间那个八度（A 那一排）的录音取来，一进音乐模式手落下去就是真钢琴。其余的进去了再取
+    const warmPianoIdle = () => {
+        if (musicPatch !== "piano" || currentScreen === "music") return;
+        preloadPiano(GRID[2].map((id) => musicFreqOf(musicIndexOf(id), 0)), { velocity: touchBase() });
+    };
+    setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(warmPianoIdle, { timeout: 4000 }) : warmPianoIdle()), 1800);
     // 自测用：地址后面加 ?debug 才把内部状态挂到 window 上
     if (/[?&]debug\b/.test(location.search)) {
         window.__ub = {
@@ -5807,6 +5959,7 @@ if (stage) {
             applyStyle, setMood, setScene, setFxField, get currentScreen() { return currentScreen; },
             parseScore, musicSemitone, get currentNotes() { return currentNotes; },
             abyss, enterAbyss, exitAbyss, musicPlayer, dream, dreamSky, enterDream, leaveDream, visualLag,
+            setTouch, liveVelocity, pianoStatus, warmPiano,
             // 预览窗口在后台时 WebGL 画布不会被合成进截图：画一帧，拍成图片盖在画布上，截完再拿掉
             snap(seconds = 0.2) {
                 stage.advance(seconds);

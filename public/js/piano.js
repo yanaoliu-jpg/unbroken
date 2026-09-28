@@ -181,3 +181,85 @@ export function renderPianoNote(midi, sr, { velocity = 0.82 } = {}) {
     for (let i = 0; i < len; i++) out[i] *= k;
     return out;
 }
+
+// ============================================================
+// 真钢琴录音的整理（js/piano-samples.js 解码完交到这里，在后台线程里跑）
+//   开头：录音前面有几毫秒到几十毫秒的空白（有的浏览器解 mp3 还会多出编码器塞的 ~25ms 静音）——
+//         找到起音（比开头最响处低 40dB 的第一个点），往前留 1.5ms，从那里开始放，按下去才跟手
+//   尾巴：一个中央 C 录了 16 秒，44.1k 立体声解码出来就是 5.6MB。头 2.5 秒原样留着（琴槌、亮的泛音都在这里）；
+//         之后是长长的余音，已经比起音低 20dB 以上，10kHz 以上几乎什么都没有了——降一半采样率存，省下四成内存。
+//         两段在 2.5 秒处交叉淡化 60ms 接起来：两段是同一个信号，线性淡化加起来正好是 1，听不出接缝
+// ============================================================
+export const SPLIT_AT = 2.5;
+const XFADE = 0.06;
+
+// 半带低通（Blackman 窗、47 阶）：只有奇数位置的系数不为 0，隔一个取一个之前先用它挡掉 11kHz 以上
+const HB_N = 23;
+const HB = (() => {
+    const h = [];
+    let s = 0;
+    for (let n = 1; n <= HB_N; n += 2) {
+        const w = 0.42 + 0.5 * Math.cos((Math.PI * n) / (HB_N + 1)) + 0.08 * Math.cos((2 * Math.PI * n) / (HB_N + 1));
+        const v = (Math.sin((Math.PI * n) / 2) / (Math.PI * n)) * w;
+        h.push(v);
+        s += v;
+    }
+    return h.map((v) => (v * 0.25) / s); // 中心 0.5 + 两边各 Σh = 1：直流增益正好是 1
+})();
+
+function decimate(x, from, count) {
+    const y = new Float32Array(count);
+    const n = x.length;
+    for (let j = 0; j < count; j++) {
+        const i = from + 2 * j;
+        let v = i < n ? 0.5 * x[i] : 0;
+        for (let k = 0; k < HB.length; k++) {
+            const d = 2 * k + 1;
+            const a = i - d >= 0 && i - d < n ? x[i - d] : 0;
+            const b = i + d < n ? x[i + d] : 0;
+            v += HB[k] * (a + b);
+        }
+        y[j] = v;
+    }
+    return y;
+}
+
+// L、R：解码出来的两个声道（44.1k）。split = 0 表示不切（松键声、踏板声这种短的）
+// 返回 { head: [L, R], tail: [L, R] | null, split }，tail 的采样率是 sr / 2，从 split 秒那一刻接上
+export function splitSample(L, R, sr, { split = SPLIT_AT } = {}) {
+    const len = L.length;
+    let peak = 0;
+    const scan = Math.min(len, Math.floor(sr * 0.5));
+    for (let i = 0; i < scan; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
+    const thr = peak * 0.01;
+    let on = 0;
+    while (on < scan && Math.abs(L[on]) < thr && Math.abs(R[on]) < thr) on++;
+    const start = Math.max(0, on - Math.round(sr * 0.0015));
+    const S = Math.round(split * sr);
+    const X = Math.round(XFADE * sr);
+    const rest = len - start;
+    // 短的（或者没要求切）：整段留着，尾巴收一下
+    if (!split || rest < S + X + sr * 2.5) {
+        const out = [L.subarray(start).slice(), R.subarray(start).slice()];
+        const fade = Math.min(out[0].length, Math.round(sr * (split ? 0.25 : 0.01)));
+        out.forEach((d) => {
+            for (let i = 0; i < fade; i++) d[d.length - fade + i] *= 0.5 + 0.5 * Math.cos((Math.PI * i) / fade);
+        });
+        return { head: out, tail: null, split: 0 };
+    }
+    const head = [L.subarray(start, start + S + X).slice(), R.subarray(start, start + S + X).slice()];
+    head.forEach((d) => {
+        for (let k = 0; k < X; k++) d[S + k] *= 1 - k / X;
+    });
+    // 尾巴第 j 个点 = 原录音 start + S + 2j 那个位置（时间上对齐）
+    const count = Math.floor((rest - S) / 2);
+    const tail = [decimate(L, start + S, count), decimate(R, start + S, count)];
+    const X2 = X / 2;
+    const fade = Math.min(count, Math.round((sr / 2) * 0.3));
+    tail.forEach((d) => {
+        for (let j = 0; j < X2; j++) d[j] *= j / X2;
+        // 录音到底了：最后 0.3 秒收掉，别"咔"地断
+        for (let i = 0; i < fade; i++) d[count - fade + i] *= 0.5 + 0.5 * Math.cos((Math.PI * i) / fade);
+    });
+    return { head, tail, split };
+}
