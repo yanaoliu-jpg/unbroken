@@ -8,7 +8,7 @@
 // 粒子的运动整个写在顶点着色器里：CPU 只在"撒"的那一下写几个数，之后每帧只改一个时间
 // ============================================================
 import * as THREE from "three";
-import { BloomChain, QUAD_VERT } from "./post.js";
+import { BloomChain, QUAD_VERT, prewarm } from "./post.js";
 
 const MAX_DUST = 3000;
 const MAX_RINGS = 6;
@@ -425,14 +425,18 @@ export class Dream {
     }
 
     // ---------------- 进 / 出 ----------------
-    // 梦境开始：泛光慢慢亮到 bloom，柔焦 haze
-    begin({ bloom = 1, haze = 0.3, aberr = 0.006, tint = null } = {}) {
+    // 梦境开始：泛光慢慢亮到 bloom，柔焦 haze。
+    // threshold：多亮的东西才起泛光（灯没压暗的场合——比如换乐器的过场——要调高，不然浅色键帽会糊成一片）
+    begin({ bloom = 1, haze = 0.3, aberr = 0.006, tint = null, threshold = 1.25, knee = 1 } = {}) {
         if (this.reduced) return;
         if (!this.built) this._build();
         this.on = true;
         this.goal = bloom;
         this.hazeGoal = haze;
         this.aberr = aberr;
+        this.fadeRate = 1.6;
+        this.bloom.threshold = threshold;
+        this.bloom.knee = knee;
         if (tint) this.matComposite.uniforms.uTint.value.copy(toColor(tint));
         else this.matComposite.uniforms.uTint.value.setRGB(1, 1, 1);
         this._attach();
@@ -452,13 +456,30 @@ export class Dream {
         this.stage._touch();
     }
 
-    // 梦醒：泛光退掉、不再冒星星；等最后一颗星尘熄了再把后期拆掉
-    end() {
+    // 梦醒：泛光退掉、不再冒星星；等最后一颗星尘熄了再把后期拆掉。fast：退得快一点（短过场用）
+    end({ fast = false } = {}) {
+        this.fadeRate = fast ? 5 : 1.6;
         this.on = false;
         this.goal = 0;
         this.hazeGoal = 0;
         this.ambient = null;
         this.stage._touch();
+    }
+
+    // 空闲时把梦境要用的着色器先编好：整个场景"画进 HDR 贴图"的那一版、星尘 / 光环 / 光柱、泛光和合成。
+    // 不编的话第一次过关、第一次换乐器飘键帽，开头会卡一下
+    prewarm() {
+        if (this.reduced || this.attached) return Promise.resolve();
+        if (!this.built) this._build();
+        const S = this.stage;
+        return prewarm(S.renderer, {
+            scenes: [
+                { scene: S.scene, camera: S.camera, target: this.bloom.rtScene },
+                { scene: this.group, camera: S.camera, target: this.bloom.rtScene, targetScene: S.scene },
+            ],
+            chain: this.bloom,
+            toScreen: [this.matComposite],
+        });
     }
 
     // 立刻收场（换屏时不想看到上一屏的残光）
@@ -508,7 +529,7 @@ export class Dream {
         // 持续冒星星的那一段：返回 false 表示这一帧它什么也没做（人停手了），不用为它重画
         const amb = this.ambient ? this.ambient(dt, time) !== false : false;
         // 泛光往目标走；猛亮的那一下自己退掉
-        const k = 1 - Math.exp(-dt * (this.goal > this.level ? 2.2 : 1.6));
+        const k = 1 - Math.exp(-dt * (this.goal > this.level ? 2.2 : this.fadeRate || 1.6));
         this.level += (this.goal - this.level) * k;
         this.haze = (this.haze || 0) + ((this.hazeGoal || 0) - (this.haze || 0)) * k;
         this.kick = Math.max(0, this.kick - dt * 1.4);

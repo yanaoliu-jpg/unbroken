@@ -1,15 +1,83 @@
 ﻿require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
+const zlib = require('zlib');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.disable('x-powered-by');
 
-// 静态文件每次都让浏览器回来确认一下有没有更新（没变就是一个 304，很便宜）。
-// 不然改了 js 之后浏览器可能还在用旧的模块，页面会报一些莫名其妙的错
-app.use(express.static(path.join(__dirname, 'public'), {
-    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+// ---------- 静态文件：压缩 + 分两档缓存 ----------
+// 缓存：
+//   vendor/（three.js）、fonts/ 不会改：让浏览器存一天，过期后先用着旧的、后台再去确认（stale-while-revalidate）
+//   自己写的 html / js / css：每次都回来确认一下有没有更新（没变就是一个 304，很便宜）——
+//   不然改了 js 之后浏览器可能还在用旧的模块，页面会报一些莫名其妙的错
+// 压缩：文本类文件第一次被要的时候压一份（brotli，不支持就 gzip），按"文件 + 修改时间"存在内存里，
+//   以后直接发压好的。three.module.js 1.3MB → 两百多 KB，第一次打开快很多。文件一改，修改时间变了就重压
+const PUBLIC = path.join(__dirname, 'public');
+const COMPRESSIBLE = /\.(js|mjs|css|html|json|svg|txt|map)$/i;
+const cacheControlFor = (rel) => (/^\/(vendor|fonts)\//.test(rel)
+    ? 'public, max-age=86400, stale-while-revalidate=604800'
+    : 'no-cache');
+const packed = new Map();  // 文件|编码 → { mtime, size, buf, etag }
+const packing = new Map(); // 同一个文件同时被要好几次：只压一遍
+
+function pack(file, enc, st) {
+    const key = file + '|' + enc;
+    const hit = packed.get(key);
+    if (hit && hit.mtime === st.mtimeMs && hit.size === st.size) return Promise.resolve(hit);
+    if (packing.has(key)) return packing.get(key);
+    const job = fs.promises.readFile(file).then((raw) => new Promise((resolve, reject) => {
+        const done = (err, buf) => {
+            if (err) return reject(err);
+            const entry = {
+                mtime: st.mtimeMs, size: st.size, buf,
+                etag: `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}-${enc}"`,
+            };
+            packed.set(key, entry);
+            resolve(entry);
+        };
+        if (enc === 'br') zlib.brotliCompress(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }, done);
+        else zlib.gzip(raw, { level: 9 }, done);
+    })).finally(() => packing.delete(key));
+    packing.set(key, job);
+    return job;
+}
+
+app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    let rel;
+    try { rel = decodeURIComponent(req.path); } catch (err) { return next(); }
+    if (rel.endsWith('/')) rel += 'index.html';
+    // 以点开头的（.env 之类）一律不管，和 express.static 的默认行为一致
+    if (!COMPRESSIBLE.test(rel) || rel.split('/').some((seg) => seg.startsWith('.'))) return next();
+    const accept = req.headers['accept-encoding'] || '';
+    const enc = /\bbr\b/.test(accept) ? 'br' : /\bgzip\b/.test(accept) ? 'gzip' : null;
+    if (!enc) return next();
+    const file = path.join(PUBLIC, rel);
+    if (!file.startsWith(PUBLIC + path.sep)) return next();
+    fs.stat(file, (err, st) => {
+        if (err || !st.isFile()) return next();
+        pack(file, enc, st).then((entry) => {
+            res.setHeader('Vary', 'Accept-Encoding');
+            res.setHeader('ETag', entry.etag);
+            res.setHeader('Last-Modified', new Date(st.mtimeMs).toUTCString());
+            res.setHeader('Cache-Control', cacheControlFor(rel));
+            const inm = (req.headers['if-none-match'] || '').split(/\s*,\s*/);
+            if (inm.includes(entry.etag)) return res.status(304).end();
+            res.type(path.extname(rel));
+            res.setHeader('Content-Encoding', enc);
+            res.setHeader('Content-Length', entry.buf.length);
+            if (req.method === 'HEAD') return res.end();
+            res.end(entry.buf);
+        }, () => next());
+    });
+});
+
+// 其余的（字体、图片）和不支持压缩的浏览器：照常由 express.static 发，缓存规则同上
+app.use(express.static(PUBLIC, {
+    setHeaders: (res, file) => res.setHeader('Cache-Control', cacheControlFor('/' + path.relative(PUBLIC, file).split(path.sep).join('/'))),
 }));
 // 请求体只有几个字母：给 2KB 足够，大了直接拒
 app.use(express.json({ limit: '2kb' }));

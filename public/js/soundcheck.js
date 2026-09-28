@@ -46,7 +46,9 @@ export async function render(build, seconds, { sr = SR, fx = null } = {}) {
 // 一件乐器按某种弹法弹一遍（和音乐模式里一样：按住 = hold，松手 = release）
 export function renderPatch(patch, patternName = "phrase", opts = {}) {
     const P = PATTERNS[patternName];
-    return render((eng) => {
+    return render(async (eng) => {
+        // 采样的乐器（钢琴）：用到的采样先算好，不然离线渲染会用上"还没好时顶上的"那套合成音
+        await eng.prepare(patch, P.notes.map((n) => freqOfIdx(n.idx)));
         P.notes.forEach((n) => {
             const v = eng.play(patch, freqOfIdx(n.idx), { when: n.t, hold: true, velocity: opts.velocity || 1 });
             if (v) v.release(n.t + n.dur);
@@ -329,7 +331,8 @@ export async function measureAll(list = INSTRUMENT_ORDER, onEach) {
 export async function timbreAll(list = INSTRUMENT_ORDER) {
     const out = {};
     for (const id of list) {
-        const a = await render((eng) => {
+        const a = await render(async (eng) => {
+            await eng.prepare(id, [freqOfIdx(7)]);
             const v = eng.play(id, freqOfIdx(7), { when: 0.2, hold: true });
             if (v) v.release(1.2);
         }, 2.6, { fx: { reverb: "off" } });

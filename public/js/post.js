@@ -14,14 +14,58 @@ export const QUAD_VERT = /* glsl */ `
     }
 `;
 
+// 着色器提前编译（页面空闲的时候调）：第一次进深海、第一次换乐器飘键帽时，不会因为现编着色器卡一下。
+// 同一个材质画到屏幕和画进渲染目标是两个不同的着色器程序（色调映射、色彩空间不一样），所以要按真正用的时候的状态编：
+//   scenes   [{ scene, camera, target, targetScene }]：挂着 target 时编（场景画进后期的 HDR 贴图就是这样）
+//   passes   全屏工序：泛光的几道画进渲染目标，合成那道画到屏幕（toneMapping 可以临时换，深海用的是 ACES）
+// 有 KHR_parallel_shader_compile 的浏览器在后台编，主线程几乎不停
+export function prewarm(renderer, { scenes = [], chain = null, toScreen = [], toneMapping = null } = {}) {
+    if (!renderer.compileAsync) return Promise.resolve();
+    const prevRT = renderer.getRenderTarget();
+    const prevTM = renderer.toneMapping;
+    const jobs = [];
+    const quads = (mats) => {
+        const sc = new THREE.Scene();
+        mats.forEach((m) => {
+            const q = new THREE.Mesh(chain.quad.geometry, m);
+            q.frustumCulled = false;
+            sc.add(q);
+        });
+        return sc;
+    };
+    try {
+        scenes.forEach(({ scene, camera, target = null, targetScene = null }) => {
+            renderer.setRenderTarget(target);
+            jobs.push(renderer.compileAsync(scene, camera, targetScene));
+        });
+        if (chain) {
+            renderer.setRenderTarget(chain.down[0]);
+            jobs.push(renderer.compileAsync(quads([chain.matDown, chain.matUp]), chain.quadCam));
+            if (toScreen.length) {
+                renderer.setRenderTarget(null);
+                if (toneMapping != null) renderer.toneMapping = toneMapping;
+                jobs.push(renderer.compileAsync(quads(toScreen), chain.quadCam));
+            }
+        }
+    } catch (err) {
+        // 编不了就算了：到时候现编，只是第一次会卡一下
+    } finally {
+        renderer.toneMapping = prevTM;
+        renderer.setRenderTarget(prevRT);
+    }
+    return Promise.all(jobs).catch(() => {});
+}
+
 export class BloomChain {
     // levels：往下缩几级（越多泛光越大越软）；threshold / knee：第一级只留比 threshold 亮的部分，knee 是软过渡的宽度
-    constructor(renderer, { levels = 4, samples = 4, threshold = 0.62, knee = 0.45 } = {}) {
+    // depth：场景那张图带一张深度贴图（体积光要知道每个像素离镜头多远）
+    constructor(renderer, { levels = 4, samples = 4, threshold = 0.62, knee = 0.45, depth = false } = {}) {
         // 半精度浮点贴图才装得下"比白还亮"的光；老设备不支持就退回 8 位（泛光弱一些，但不会黑屏）
         const ext = renderer.extensions;
         const hdr = ext.has("EXT_color_buffer_float") || ext.has("EXT_color_buffer_half_float");
         const type = hdr ? THREE.HalfFloatType : THREE.UnsignedByteType;
         this.rtScene = new THREE.WebGLRenderTarget(4, 4, { type, depthBuffer: true, samples });
+        if (depth) this.rtScene.depthTexture = new THREE.DepthTexture(4, 4, THREE.UnsignedIntType);
         this.down = Array.from({ length: levels }, () => new THREE.WebGLRenderTarget(4, 4, { type, depthBuffer: false }));
         this.up = Array.from({ length: levels - 1 }, () => new THREE.WebGLRenderTarget(4, 4, { type, depthBuffer: false }));
         this.threshold = threshold;
@@ -111,8 +155,13 @@ export class BloomChain {
     render(renderer, scene, camera) {
         renderer.setRenderTarget(this.rtScene);
         renderer.render(scene, camera);
+        return this.bloomFrom(renderer, this.rtScene.texture);
+    }
+
+    // 从任意一张图算泛光（深海模式：场景先加上水里的体积光，再从加完的那张取亮部）
+    bloomFrom(renderer, texture) {
         // 往下：亮部 → 1/2 → 1/4 → …
-        let src = this.rtScene.texture;
+        let src = texture;
         const du = this.matDown.uniforms;
         du.uKnee.value = this.knee;
         this.down.forEach((rt, i) => {

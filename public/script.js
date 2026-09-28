@@ -10,11 +10,12 @@
 // 声音在 js/audio.js，配色在 js/colorways.js。
 // ============================================================
 import { KeyboardStage, REGIONS } from "./js/kb3d.js";
-import { AudioEngine, INSTRUMENTS, INSTRUMENT_BANKS } from "./js/audio.js";
+import { AudioEngine, INSTRUMENTS, INSTRUMENT_BANKS, preloadPiano } from "./js/audio.js";
 import { COLORWAYS, LEVEL_COLORWAYS, HOME_COLORWAY } from "./js/colorways.js";
-import { Abyss, ABYSS_TANK } from "./js/abyss.js";
+import { Abyss, ABYSS_TANK, ABYSS_THEMES, ABYSS_THEME_ORDER } from "./js/abyss.js";
 import { Dream } from "./js/dream.js";
 import { DreamSky, sparkleSprite, orbSprite } from "./js/dreamsky.js";
+import { Backdrop, motifOf } from "./js/motifs.js";
 
 // 用相对路径，自动适配当前访问地址
 const API_ENDPOINT = "/api/generate";
@@ -351,6 +352,7 @@ function applyColorway(cw, opts) {
     root.setProperty("--grad-a", stage.gradientColor(0));
     root.setProperty("--grad-b", stage.gradientColor(0.5));
     root.setProperty("--grad-c", stage.gradientColor(1));
+    updateAtmosphere(cw);
 }
 
 // 键帽上的字：只在内容真的变了时才重画那张小画布
@@ -470,10 +472,24 @@ function loadStyle() {
             mood: MOODS[raw.mood] ? raw.mood : "none",
             scene: SCENES[raw.scene] ? raw.scene : "none",
             custom: raw.custom && typeof raw.custom === "object" ? raw.custom : {},
+            ambVol: raw.ambVol && typeof raw.ambVol === "object" ? raw.ambVol : {},
         };
     } catch (err) {
-        return { mood: "none", scene: "none", custom: {} };
+        return { mood: "none", scene: "none", custom: {}, ambVol: {} };
     }
+}
+
+// 环境声音量：滑杆 0–100，按平方换算成音量（耳朵对音量是按比例听的，低的那一段要细一点），最大是校准音量的 2 倍。
+// 每个场景各记各的：雨声想开大一点、城市想小一点，互不影响
+const AMB_DEFAULT = 55;
+const ambLevelOf = (v) => 2 * Math.pow(Math.max(0, Math.min(100, v)) / 100, 2);
+const AMB_NAMES = {
+    love: "暖光", rain: "雨声", adventure: "峡谷", dream: "星空", forest: "林间", city: "街道", ocean: "海浪", sunset: "晚风",
+};
+
+function sceneAmbVol(id = style.scene) {
+    const v = style.ambVol && style.ambVol[id];
+    return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : AMB_DEFAULT;
 }
 
 // 实际生效的效果：默认 ← 场景推荐 ← 情绪推荐 ← 自己改的
@@ -502,10 +518,10 @@ function applyStyle({ persist = true } = {}) {
     const scene = SCENES[style.scene];
     const fx = effectiveFx();
     audio.setFx({
-        reverb: fx.reverb, echo: fx.echo, tone: fx.tone,
+        reverb: fx.reverb, reverbMix: 1, echo: fx.echo, tone: fx.tone,
         bloom: fx.bloom ? 0.7 : 0, width: fx.width ? 1.6 : 1, cinematic: !!fx.cinematic,
     });
-    audio.setAmbience(fx.ambience && scene.amb ? scene.amb : "off", 0.6);
+    audio.setAmbience(fx.ambience && scene.amb ? scene.amb : "off", ambLevelOf(sceneAmbVol()));
     const L = { tint: "#ffffff", exposure: 1.05, key: 1, ...(mood.light || {}) };
     const tl = TONE_LIGHT[fx.tone];
     stage.setLighting({
@@ -519,8 +535,7 @@ function applyStyle({ persist = true } = {}) {
     document.body.dataset.tone = fx.tone;
     document.body.dataset.scene = style.scene;
     document.body.classList.toggle("cinematic", !!fx.cinematic);
-    refreshColorway();
-    sceneFX.set(scene.particles || null);
+    refreshColorway(); // 里面会顺手换背景画和空中飘的东西
     syncStylePanel();
     if (currentScreen === "music") {
         syncKeyUI();
@@ -559,12 +574,13 @@ function resetStyle() {
     style.mood = "none";
     style.scene = "none";
     style.custom = {};
+    style.ambVol = {};
     applyStyle();
 }
 
 // 当前这一屏应该穿哪套键帽：选了场景就是场景的，否则每屏各有各的
 function screenColorway() {
-    if (abyssOn) return COLORWAYS.abyss;
+    if (abyssOn) return abyssColorway();
     const sc = SCENES[style.scene];
     if (sc && sc.colorway) return COLORWAYS[sc.colorway];
     if (currentScreen === "game" || currentScreen === "reward") return levelColorway(state.level);
@@ -649,6 +665,16 @@ function buildStylePanel() {
     });
     $("sp-reset").addEventListener("click", resetStyle);
     $("sp-check").addEventListener("click", quickSoundCheck);
+    // 环境声音量：拖的时候只改音量，松手再存
+    const amb = $("sp-amb");
+    amb.addEventListener("input", () => {
+        const v = Math.max(0, Math.min(100, Number(amb.value) || 0));
+        style.ambVol[style.scene] = v;
+        $("sp-amb-v").textContent = v + "%";
+        const scene = SCENES[style.scene];
+        if (scene.amb && effectiveFx().ambience) audio.setAmbience(scene.amb, ambLevelOf(v));
+    });
+    amb.addEventListener("change", () => store.set("mss-style", JSON.stringify(style)));
 }
 
 function syncStylePanel() {
@@ -675,6 +701,15 @@ function syncStylePanel() {
         b.classList.toggle("on", on);
         b.setAttribute("aria-pressed", String(on));
     });
+    // 环境声音量：选了带环境声的场景、环境声开着才能调
+    const scene = SCENES[style.scene];
+    const hasAmb = !!scene.amb && !!fx.ambience;
+    const ambEl = $("sp-amb");
+    ambEl.disabled = !hasAmb;
+    ambEl.value = String(sceneAmbVol());
+    $("sp-amb-v").textContent = hasAmb ? sceneAmbVol() + "%" : "—";
+    $("sp-amb-name").textContent = scene.amb ? AMB_NAMES[scene.amb] || scene.name : "先选一个场景";
+    $("sp-amb-row").classList.toggle("off", !hasAmb);
     // 顶栏按钮上一个小点：有自定义风格时亮着
     styleBtn.classList.toggle("has-style", style.mood !== "none" || style.scene !== "none" || Object.keys(style.custom).length > 0);
 }
@@ -719,9 +754,14 @@ function quickSoundCheck() {
 // 粒子不多（几十个），30fps 画，页面在后台或"减少动效"时停下
 // ============================================================
 class SceneFX {
-    constructor(canvas) {
+    constructor(canvas, fgCanvas = null) {
         this.canvas = canvas;
         this.ctx = canvas.getContext("2d");
+        // 前景：几颗很大、很虚的光斑从镜头前面飘过，和背景那层一起做出景深
+        this.fg = fgCanvas;
+        this.fctx = fgCanvas ? fgCanvas.getContext("2d") : null;
+        this.near = [];
+        this.sprites = new Map();
         this.kind = null;
         this.parts = [];
         this.raf = null;
@@ -740,19 +780,45 @@ class SceneFX {
         // 软的东西不需要高清：按 1 倍像素画，省一大截
         this.canvas.width = this.w;
         this.canvas.height = this.h;
+        if (this.fg) {
+            this.fg.width = this.w;
+            this.fg.height = this.h;
+        }
         if (this.kind) this._seed();
         if (reduceMotion && this.kind) this._draw(0);
     }
 
     set(kind) {
         this.colors = [colorway.glow, colorway.accent, colorway.highlight];
+        this.grad = [stage.gradientColor(0), stage.gradientColor(0.5), stage.gradientColor(1)];
         if (kind === this.kind) return;
         this.kind = kind;
         this.canvas.classList.toggle("on", !!kind);
+        if (this.fg) this.fg.classList.toggle("on", !!kind && !reduceMotion && NEAR_KINDS.has(kind));
         this._seed();
         this._sync();
-        if (!kind) this.ctx.clearRect(0, 0, this.w, this.h);
-        else if (reduceMotion) this._draw(0);
+        if (!kind) {
+            this.ctx.clearRect(0, 0, this.w, this.h);
+            if (this.fctx) this.fctx.clearRect(0, 0, this.w, this.h);
+        } else if (reduceMotion) this._draw(0);
+    }
+
+    // 软圆光斑的小图（每种颜色画一次）
+    _disc(color) {
+        let s = this.sprites.get(color);
+        if (!s) {
+            s = document.createElement("canvas");
+            s.width = s.height = 64;
+            const g = s.getContext("2d");
+            const r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+            r.addColorStop(0, color);
+            r.addColorStop(0.55, color + "99");
+            r.addColorStop(1, color + "00");
+            g.fillStyle = r;
+            g.fillRect(0, 0, 64, 64);
+            this.sprites.set(color, s);
+        }
+        return s;
     }
 
     _sync() {
@@ -799,10 +865,43 @@ class SceneFX {
             case "haze":
                 for (let i = 0; i < n(36); i++) P.push({ x: R() * W, y: R() * H, r: 0.8 + R() * 1.8, vx: 3 + R() * 8, vy: -2 - R() * 5, ph: R() * 6 });
                 break;
+            case "snow":
+                for (let i = 0; i < n(90); i++) P.push({ x: R() * W, y: R() * H, r: 0.7 + R() * 2.2, vy: 14 + R() * 30, ph: R() * 6, a: 0.35 + R() * 0.5 });
+                break;
+            case "motes":
+                for (let i = 0; i < n(60); i++) P.push({ x: R() * W, y: R() * H, r: 0.6 + R() * 1.5, vx: (R() - 0.5) * 7, vy: -2 - R() * 5, ph: R() * 6, sp: 0.4 + R() * 1.2 });
+                break;
+            case "leaves":
+                for (let i = 0; i < n(20); i++) P.push({ x: R() * W, y: R() * H, vy: 16 + R() * 22, vx: 6 + R() * 14, s: 5 + R() * 5, rot: R() * 6, vr: (R() - 0.5) * 1.6, ph: R() * 6, c: i % 2 });
+                break;
+            case "sparkles":
+                for (let i = 0; i < n(34); i++) P.push({ x: R() * W, y: R() * H, s: 6 + R() * 11, vy: -(2 + R() * 6), ph: R() * 6, sp: 0.8 + R() * 2, c: i % 3 });
+                break;
+            case "notes":
+                for (let i = 0; i < n(14); i++) P.push({ x: R() * W, y: R() * H, s: 13 + R() * 12, vy: -(8 + R() * 14), ph: R() * 6, g: R() < 0.5 ? "♪" : "♫", c: i % 3, rot: (R() - 0.5) * 0.5 });
+                break;
+            case "pixels":
+                for (let i = 0; i < n(34); i++) P.push({ x: R() * W, y: R() * H, s: 2 + Math.floor(R() * 3) * 2, vy: 10 + R() * 18, c: i % 2 });
+                break;
+            case "mist":
+                for (let i = 0; i < n(9); i++) P.push({ x: R() * W, y: H * (0.2 + R() * 0.8), r: 140 + R() * 180, vx: 4 + R() * 8, a: 0.035 + R() * 0.04 });
+                break;
             default:
                 break;
         }
         this.parts = P;
+        // 前景的大光斑：跟着这种东西的颜色和飘法，但大得多、虚得多、少得多
+        const N = [];
+        if (this.kind && NEAR_KINDS.has(this.kind)) {
+            const rise = RISING_KINDS.has(this.kind);
+            for (let i = 0; i < (small ? 3 : 6); i++) {
+                N.push({
+                    x: R() * W, y: R() * H, r: 26 + R() * 50, vx: (R() - 0.5) * 10,
+                    vy: (rise ? -1 : 1) * (6 + R() * 12), ph: R() * 6, a: 0.07 + R() * 0.09, c: i % 3,
+                });
+            }
+        }
+        this.near = N;
     }
 
     _loop(now) {
@@ -984,14 +1083,171 @@ class SceneFX {
                 });
                 break;
             }
+            case "snow":
+                c.fillStyle = "#ffffff";
+                this.parts.forEach((p) => {
+                    p.y += p.vy * dt;
+                    p.x += Math.sin(t * 0.8 + p.ph) * 12 * dt;
+                    wrap(p);
+                    c.globalAlpha = p.a;
+                    c.beginPath();
+                    c.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                    c.fill();
+                });
+                break;
+            case "motes":
+                // 灯光里的浮尘：很小，慢慢漂，一闪一闪
+                c.fillStyle = mixHex(c3, "#ffffff", 0.4);
+                this.parts.forEach((p) => {
+                    p.x += (p.vx + Math.sin(t * 0.5 + p.ph) * 3) * dt;
+                    p.y += p.vy * dt;
+                    wrap(p);
+                    c.globalAlpha = 0.2 + 0.45 * (0.5 + 0.5 * Math.sin(t * p.sp + p.ph));
+                    c.beginPath();
+                    c.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                    c.fill();
+                });
+                break;
+            case "leaves": {
+                const [l1, l2] = this.grad;
+                this.parts.forEach((p) => {
+                    p.y += p.vy * dt;
+                    p.x += (p.vx * Math.sin(t * 0.6 + p.ph)) * dt;
+                    p.rot += p.vr * dt;
+                    wrap(p);
+                    c.save();
+                    c.translate(p.x, p.y);
+                    c.rotate(p.rot);
+                    c.scale(1, 0.6 + 0.4 * Math.sin(t * 1.4 + p.ph));
+                    c.globalAlpha = 0.5;
+                    c.fillStyle = p.c ? l1 : l2;
+                    c.beginPath();
+                    c.ellipse(0, 0, p.s, p.s * 0.42, 0, 0, Math.PI * 2);
+                    c.fill();
+                    c.globalAlpha = 0.35;
+                    c.strokeStyle = "#000000";
+                    c.lineWidth = 0.6;
+                    c.beginPath();
+                    c.moveTo(-p.s, 0);
+                    c.lineTo(p.s, 0);
+                    c.stroke();
+                    c.restore();
+                });
+                break;
+            }
+            case "sparkles":
+                c.globalCompositeOperation = "lighter";
+                this.parts.forEach((p) => {
+                    p.y += p.vy * dt;
+                    wrap(p, 20);
+                    const tw = 0.5 + 0.5 * Math.sin(t * p.sp + p.ph);
+                    c.globalAlpha = 0.15 + 0.65 * tw * tw;
+                    const s = p.s * (0.7 + 0.3 * tw);
+                    c.drawImage(this._spark(this.grad[p.c]), p.x - s, p.y - s, s * 2, s * 2);
+                });
+                c.globalCompositeOperation = "source-over";
+                break;
+            case "notes":
+                c.textAlign = "center";
+                c.textBaseline = "middle";
+                this.parts.forEach((p) => {
+                    p.y += p.vy * dt;
+                    p.x += Math.sin(t * 0.7 + p.ph) * 10 * dt;
+                    wrap(p, 30);
+                    c.save();
+                    c.translate(p.x, p.y);
+                    c.rotate(p.rot + Math.sin(t + p.ph) * 0.15);
+                    c.globalAlpha = 0.28 + 0.18 * Math.sin(t * 0.9 + p.ph);
+                    c.fillStyle = this.grad[p.c];
+                    c.font = `600 ${Math.round(p.s)}px system-ui, sans-serif`;
+                    c.fillText(p.g, 0, 0);
+                    c.restore();
+                });
+                break;
+            case "pixels": {
+                const [q1, , q3] = this.grad;
+                this.parts.forEach((p) => {
+                    p.y += p.vy * dt;
+                    wrap(p);
+                    c.globalAlpha = 0.55;
+                    c.fillStyle = p.c ? q1 : q3;
+                    c.fillRect(Math.round(p.x / 2) * 2, Math.round(p.y / 2) * 2, p.s, p.s);
+                });
+                break;
+            }
+            case "mist":
+                this.parts.forEach((p) => {
+                    p.x += p.vx * dt;
+                    if (p.x - p.r > W) p.x = -p.r;
+                    const g = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+                    g.addColorStop(0, mixHex(c3, "#ffffff", 0.3));
+                    g.addColorStop(1, "rgba(0,0,0,0)");
+                    c.globalAlpha = p.a;
+                    c.fillStyle = g;
+                    c.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+                });
+                break;
             default:
                 break;
         }
         c.globalAlpha = 1;
+        this._drawNear(dt, t);
+    }
+
+    // 十字星芒的小图
+    _spark(color) {
+        const key = "s" + color;
+        let s = this.sprites.get(key);
+        if (!s) {
+            s = sparkleSprite(color);
+            this.sprites.set(key, s);
+        }
+        return s;
+    }
+
+    // 前景的大光斑：离镜头很近、没对上焦，所以又大又虚；从屏幕外飘进来再飘出去
+    _drawNear(dt, t) {
+        const c = this.fctx;
+        if (!c || !this.near.length) return;
+        const W = this.w;
+        const H = this.h;
+        c.clearRect(0, 0, W, H);
+        const white = this.kind === "snow" || this.kind === "bubbles";
+        this.near.forEach((p) => {
+            p.x += (p.vx + Math.sin(t * 0.3 + p.ph) * 6) * dt;
+            p.y += p.vy * dt;
+            if (p.y > H + p.r) { p.y = -p.r; p.x = Math.random() * W; }
+            if (p.y < -p.r) { p.y = H + p.r; p.x = Math.random() * W; }
+            if (p.x > W + p.r) p.x = -p.r;
+            if (p.x < -p.r) p.x = W + p.r;
+            // 越靠屏幕中间越淡：光斑主要在四周，不压在键盘和字上
+            const cx = (p.x / W - 0.5) * 2;
+            const cy = (p.y / H - 0.5) * 2;
+            const edge = Math.min(1, Math.max(0, Math.hypot(cx, cy) - 0.35) * 1.4);
+            c.globalAlpha = p.a * edge * (0.75 + 0.25 * Math.sin(t * 0.6 + p.ph));
+            const col = white ? "#ffffff" : this.grad[p.c];
+            c.drawImage(this._disc(col), p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+        });
+        c.globalAlpha = 1;
     }
 }
 
-const sceneFX = new SceneFX($("scene-canvas"));
+// 有前景光斑的那几种（雨、雾这种一大片的就不要了）；往上飘的那几种前景也往上飘
+const NEAR_KINDS = new Set(["petals", "embers", "stars", "fireflies", "bokeh", "bubbles", "snow", "motes", "leaves", "sparkles", "notes", "pixels"]);
+const RISING_KINDS = new Set(["embers", "bubbles", "motes", "sparkles", "notes", "haze"]);
+
+const sceneFX = new SceneFX($("scene-canvas"), $("scene-fg"));
+const backdrop = new Backdrop($("backdrop-canvas"), { reduced: reduceMotion });
+const CW_ID = new Map(Object.entries(COLORWAYS).map(([id, cw]) => [cw, id]));
+
+// 配色换了：背景画换成这套的，空中飘的东西也换（风格面板里选了场景的话，场景的粒子优先）
+function updateAtmosphere(cw) {
+    // 深海里整页的背景都藏起来了：背景画按"深海"（什么都不画），不用为自己挑的键盘颜色去画一张山
+    const id = abyssOn ? "abyss" : CW_ID.get(cw) || "qinglan";
+    backdrop.show(cw, id);
+    const scene = SCENES[style.scene];
+    sceneFX.set((scene && scene.particles) || motifOf(id).atmo || null);
+}
 
 // ---------- 小提示条（Safari 声音被暂停……）----------
 const toastEl = $("toast");
@@ -1108,6 +1364,7 @@ function setPedal(on) {
         pedalDown = on;
         if (!on) players.forEach((p) => p.liftPedal());
         document.body.classList.toggle("pedal-down", on);
+        audio.setSustain(on);
     }
     syncModifierUI();
 }
@@ -1513,9 +1770,11 @@ function leaveScreen(name) {
         stopDemo();
         freePlayer.releaseAll();
     } else if (name === "music") {
+        endSwap({ interrupt: true });
         stopPlayback();
         setFollow(false);
         if (abyssOn) teardownAbyss();
+        syncCapGradient(); // 渐变键帽只在音乐模式里
         musicPlayer.releaseAll();
         physicalAlter = 0;
         applyAlter();
@@ -2026,6 +2285,11 @@ function startLevel(n) {
     const keys = generateLevelKeys(n);
     const cw = levelColorway(n);
     const inst = INSTRUMENTS[levelSound(n).patch];
+    // 钢琴那一关：走线会弹到的那一串音先去算采样
+    if (levelSound(n).patch === "piano") {
+        const snd = levelSoundFor(n);
+        preloadPiano(Array.from({ length: snd.span + 1 }, (_, i) => scaleFreqOf(snd, i)));
+    }
     $("hud-num").textContent = pad2(n);
     $("hud-total").textContent = pad2(TOTAL_LEVELS);
     $("hud-theme-name").textContent = `${cw.name} · ${inst.name}`;
@@ -3780,6 +4044,8 @@ function musicView() {
 }
 
 function setupMusic() {
+    if (musicPatch === "piano") warmPiano();
+    syncCapGradient();
     applyColorway(screenColorway());
     stage.resetKeys();
     clearLegends();
@@ -3817,6 +4083,11 @@ function musicLegendFor(id) {
     // 八度记号和谱面写法一样：_ 低八度、^ 高八度
     const marks = oct === 0 ? "_" : "^".repeat(Math.max(0, oct - 1));
     const d = { sub: marks + ALTER_SIGN[String(musicAlter)] + DEGREES[idx % 7] };
+    // 深海里键帽一排比一排高，隔着水箱平视看不清顶面：字母和音级刻在正面
+    if (abyssOn) {
+        d.front = label(id);
+        d.frontSub = d.sub;
+    }
     if (keyMark[id]) {
         d.mark = keyMark[id];
         d.markColor = colorway.accent;
@@ -3847,9 +4118,67 @@ function syncInstrumentKeys() {
     });
 }
 
+// ---------- 渐变键帽（音乐模式）----------
+// 整块键盘从左下到右上铺一道渐变：字母键取渐变上自己那个位置的颜色，功能键压暗一截，强调键用点缀色；
+// 字的颜色按每颗键帽的深浅自动挑。"同色渐变"跟着当前乐器那套配色自己的渐变走，其余是固定的几组
+const CAP_GRADS = [
+    { id: "off", name: "原色", tip: "每件乐器自己那套键帽" },
+    { id: "follow", name: "同色渐变", follow: true, tip: "用这件乐器配色里的渐变，铺满整块键盘" },
+    { id: "ocean", name: "海洋", stops: ["#0e4d64", "#137a7f", "#27b3a4", "#8be8c6"], accent: "#f2c14e", tip: "深海蓝 → 青绿 → 薄荷，金色点缀" },
+    { id: "sunset", name: "日落", stops: ["#3b1f5c", "#a53f6b", "#ef7a5a", "#ffd07a"], accent: "#fff1c9", tip: "暮紫 → 玫红 → 橙 → 金" },
+    { id: "sakura", name: "樱花", stops: ["#fff0f3", "#ffc6d4", "#f58fb0", "#c9577f"], accent: "#6b2140", tip: "浅粉 → 樱粉 → 玫瑰" },
+    { id: "rainbow", name: "彩虹", stops: ["#ff6b6b", "#ffb86b", "#ffe66d", "#7ee081", "#5bc0eb", "#9b7bff"], accent: "#ffffff", tip: "一整道彩虹" },
+];
+let capGradId = CAP_GRADS.some((g) => g.id === store.get("mss-capgrad")) ? store.get("mss-capgrad") : "off";
+
+function capGradOpts() {
+    const g = CAP_GRADS.find((x) => x.id === capGradId);
+    if (!g || g.id === "off") return null;
+    return g.follow ? { follow: true } : { stops: g.stops, accent: g.accent };
+}
+
+// 只在平常的音乐模式里生效：关卡、首页、深海都还是各自的配色
+function syncCapGradient() {
+    if (!stage) return;
+    stage.setCapGradient(currentScreen === "music" && !abyssOn ? capGradOpts() : null);
+    document.querySelectorAll("#cap-grad .cg-btn").forEach((b) => {
+        const on = b.dataset.grad === capGradId;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", String(on));
+    });
+}
+
+function setCapGrad(id) {
+    if (!CAP_GRADS.some((g) => g.id === id)) return;
+    capGradId = id;
+    store.set("mss-capgrad", id);
+    syncCapGradient();
+    // 换上的那一刻从中间荡开一圈，看得出是整块键盘一起换的
+    if (currentScreen === "music" && !abyssOn && stage) stage.ripple("g", { strength: 0.9, speed: 8, life: 1.6 });
+}
+
+function buildCapGradRow() {
+    const el = $("cap-grad");
+    CAP_GRADS.forEach((g) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "cg-btn";
+        b.dataset.grad = g.id;
+        b.title = g.tip;
+        if (g.stops) b.style.setProperty("--cg", `linear-gradient(90deg, ${g.stops.join(", ")})`);
+        const kind = g.id === "off" ? " cg-sw-off" : g.follow ? " cg-sw-follow" : "";
+        b.innerHTML = `<span class="cg-sw${kind}" aria-hidden="true"></span><span class="cg-name">${g.name}</span>`;
+        b.addEventListener("click", () => setCapGrad(g.id));
+        el.appendChild(b);
+    });
+    syncCapGradient();
+}
+
 function syncBankKeys() {
     if (currentScreen !== "music") return;
-    INSTRUMENT_BANKS[musicBank].forEach((inst, i) => legend("f" + (i + 1), { main: "F" + (i + 1), sub: INSTRUMENTS[inst].name }));
+    INSTRUMENT_BANKS[musicBank].forEach((inst, i) => legend("f" + (i + 1), {
+        main: "F" + (i + 1), sub: INSTRUMENTS[inst].name, ...(abyssOn ? { front: INSTRUMENTS[inst].name } : {}),
+    }));
     legend("caps", { main: "caps", sub: musicBank ? "B 组 ●" : "A 组" });
     stage.setKey("caps", { lift: musicBank ? -0.09 : 0, glow: musicBank ? 0.8 : 0, emissive: musicBank ? 0.5 : 0 });
 }
@@ -3893,9 +4222,17 @@ function applyAlter() {
     syncModifierUI();
 }
 
+// 钢琴的每个音是后台线程里算好的采样（一个音几十毫秒）：这一屏会弹到的音先排队去算，
+// 中间那个八度排最前——手最先落在那里。还没算好的音先用实时合成的钢琴顶上，不用等
+function warmPiano() {
+    const ids = GRID_IDS.slice().sort((a, b) => Math.abs(musicIndexOf(a) - 10) - Math.abs(musicIndexOf(b) - 10));
+    preloadPiano(ids.map((id) => musicFreqOf(musicIndexOf(id), 0)));
+}
+
 // ---------- 调和八度 ----------
 function setMusicKey(k, { announce = false } = {}) {
     musicKey = Math.max(KEY_MIN, Math.min(KEY_MAX, k));
+    if (musicPatch === "piano" && currentScreen === "music") warmPiano();
     syncKeyUI();
     if (announce && currentScreen === "music") {
         // 换调就把 do mi sol 弹一下，耳朵马上知道新的"1"在哪
@@ -3906,6 +4243,7 @@ function setMusicKey(k, { announce = false } = {}) {
 
 function setMusicOctave(o, { announce = false } = {}) {
     musicOctave = Math.max(-2, Math.min(2, o));
+    if (musicPatch === "piano" && currentScreen === "music") warmPiano();
     syncKeyUI();
     if (announce && currentScreen === "music") {
         audio.play(musicPatch, musicFreqOf(7, 0), { velocity: 0.6, length: 0.6 });
@@ -3972,6 +4310,7 @@ function setInstrument(id, { preview = false } = {}) {
     const inst = INSTRUMENTS[id];
     $("music-inst").textContent = inst.name;
     $("music-inst-en").textContent = inst.en;
+    $("abyss-inst").textContent = inst.name; // 深海控制栏上那一个（在水箱里按 F 键换乐器也要跟着变）
     instRowEl.querySelectorAll(".inst-chip").forEach((b) => {
         const on = b.dataset.inst === id;
         b.classList.toggle("on", on);
@@ -3985,18 +4324,127 @@ function setInstrument(id, { preview = false } = {}) {
             }
         }
     });
+    if (id === "piano" && currentScreen === "music") warmPiano();
+    // 用户亲手换的（点按钮、按 F 键）：整块键盘的键帽一道波似的飘起来、在空中换上新颜色、再落回轴上。
+    // 连着快速换的时候（上一趟还没落完、或者刚落下一秒多）就不飘了，直接换
+    const wasSwapping = !!swap;
+    if (swap) endSwap({ interrupt: true });
+    const animate = preview && swapAllowed() && !wasSwapping && stage.time - lastSwapAt > 1.2;
     if (currentScreen === "music") {
         // 换乐器 = 换一套键帽：钢琴是黑白，星火是深色透光……（选了场景的话场景优先）
-        applyColorway(screenColorway());
+        applyColorway(screenColorway(), animate ? { hold: true } : undefined);
         syncInstrumentKeys();
         refreshMusicKeyboard();
         syncModifierUI();
     }
+    if (animate) {
+        startInstrumentSwap(id);
+        return;
+    }
+    if (currentScreen === "music") stage.releaseColorway();
     if (preview) {
         // 换上就先听一声：do mi sol do 往上一跳
         [0, 2, 4, 7].forEach((d, i) => audio.play(id, musicFreqOf(7 + d, 0), { when: i * 0.085, velocity: 0.7 }));
         stage.ripple("f", { strength: 0.7 });
     }
+}
+
+// ---------- 换乐器的过场：键帽飘起来、在空中换色、再落回轴上 ----------
+// 一道波从左上角（Esc）扫到右下角：键帽一颗颗升起、歪着悬一下，升到最高处换上新乐器的颜色（底下的灯把露出来的轴体照亮），
+// 再落回轴上、"咔哒"一顿。镜头同时从正前方转到斜侧 3/4、再转回来——飘在空中的键帽和一排排轴体才看得出立体。
+// 键帽升起时新乐器弹 do mi sol do（跟着波从左往右），落下时一串很轻的"咔哒"。一共两秒左右；弹一下琴或再换乐器就立刻落下收场
+const SWAP_NOTES = [0, 2, 4, 7];
+let swap = null;
+let lastSwapAt = -1e9;
+
+function swapAllowed() {
+    return !reduceMotion && currentScreen === "music" && !abyssOn && !!stage && stage.visible;
+}
+
+const easeInOut3 = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+function startInstrumentSwap(id) {
+    const S = stage;
+    const cw = screenColorway();
+    const glow = cw.glow;
+    const spread = 0.62;
+    const rise = 0.4;
+    const hover = 0.2;
+    const fall = 0.44;
+    const F = { id, voices: [] };
+    swap = F;
+    lastSwapAt = S.time;
+    // 声音按耳机延迟提前一点排，听见的时候键帽正好升到那里
+    const ctx = audio.ensure();
+    const lead = Math.min(0.3, visualLag());
+    if (ctx) {
+        SWAP_NOTES.forEach((d, i) => {
+            const u = 0.1 + i * 0.26;
+            const v = audio.play(id, musicFreqOf(7 + d, 0), { when: Math.max(0, u * spread + rise * 0.85 - lead), velocity: 0.72, pan: -0.6 + i * 0.4 });
+            if (v) F.voices.push(v);
+        });
+        const clicks = [];
+        for (let i = 0; i < 16; i++) {
+            const u = (i + Math.random() * 0.8) / 16;
+            clicks.push({ at: Math.max(0, u * spread + rise + hover + fall - lead), pan: -0.8 + u * 1.6 });
+        }
+        audio.keyClicks(clicks);
+    }
+    // 升到最高处的键多撒一点星尘（泛光门槛调高：只有星尘发光，浅色键帽不会糊成一片）
+    if (dream && !dreaming) dream.begin({ bloom: 0.7, haze: 0, aberr: 0.003, threshold: 2.1, knee: 0.9 });
+    const tmp = { x: 0, y: 0, z: 0 };
+    S.startFloat({
+        spread, rise, hover, fall, height: 1.35,
+        onPeak: (k) => {
+            S.releaseColorway((x) => x === k);
+            S.flare(k.spec.id, glow);
+            if (dream && Math.random() < 0.4) {
+                tmp.x = k.group.position.x;
+                tmp.y = k.baseLift + k.fy + 0.5;
+                tmp.z = k.group.position.z;
+                dream.emit(tmp, { count: 2, speed: 0.55, spread: 2, life: [0.5, 1.1], size: [0.04, 0.11], buoy: 0.3, star: 0.4, colors: [glow, "#ffffff"] });
+            }
+        },
+        onDone: () => endSwap(),
+    });
+    // 镜头：在平常的取景上叠一个"绕着转"的偏移——往左前方转到 3/4、压低一点，悬一会儿，再转回来。
+    // 叠在平常取景上（鼠标视差照样在），开始和结束都不会跳；中途被打断就从当时的位置平滑地转回去
+    const T = spread + rise + hover + fall + 0.35;
+    const cam = { t0: S.time, e: 0, back: -1, from: 0 };
+    F.cam = cam;
+    const offCam = S.onTick(() => {
+        if (currentScreen !== "music") cam.back = -2; // 换屏了：新的一屏自己定镜头，偏移马上清掉
+        const t = S.time - cam.t0;
+        if (cam.back === -2) cam.e = 0;
+        else if (cam.back >= 0) cam.e = cam.from * (1 - easeInOut3(Math.min(1, (S.time - cam.back) / 0.45)));
+        else cam.e = t < 0.7 ? easeInOut3(t / 0.7) : t > T - 0.75 ? easeInOut3(Math.max(0, T - t) / 0.75) : 1;
+        S.orbit.az = -22 * cam.e;
+        S.orbit.el = -10 * cam.e;
+        S._camDirty = true;
+        if (cam.back === -2 || (cam.back >= 0 && cam.e <= 1e-4) || (cam.back < 0 && t >= T)) {
+            S.orbit.az = 0;
+            S.orbit.el = 0;
+            offCam();
+        }
+    });
+}
+
+// 收场：interrupt（弹了琴、又换了乐器、离开音乐模式）= 还在空中的键帽马上落下，还没响的音不响了，镜头转回去
+function endSwap({ interrupt = false } = {}) {
+    const F = swap;
+    if (!F) return;
+    swap = null;
+    if (F.cam && F.cam.back === -1) {
+        F.cam.from = F.cam.e;
+        F.cam.back = stage.time;
+    }
+    if (stage.floating) stage.endFloat();
+    stage.releaseColorway();
+    if (interrupt) {
+        const now = audio.now();
+        F.voices.forEach((v) => { if (v.t0 > now) v.release(now); });
+    }
+    if (dream && !dreaming) dream.end({ fast: true });
 }
 
 // ---------- 曲库 ----------
@@ -4478,6 +4926,8 @@ function advanceFollow(key, alter) {
 
 const musicPlayer = makeHoldPlayer({
     start: (id) => {
+        // 换乐器的键帽还在空中：一弹琴就立刻落下收场，镜头回来
+        if (swap) endSwap({ interrupt: true });
         const idx = musicIndexOf(id);
         // 按下那一刻的升降跟着这个音走到松手，中途放开 Shift 不改已经在响的音
         musicKeyAlter[id] = musicAlter;
@@ -4486,7 +4936,7 @@ const musicPlayer = makeHoldPlayer({
         const voice = audio.play(musicPatch, f, { hold: true, pan: panOf(id) });
         if (abyssOn) {
             abyss.noteOn(id, { velocity: 0.95, freq: f });
-            audio.bubbles({ pan: panOf(id) });
+            audio.bubbles({ pan: panOf(id), kind: ABYSS_THEMES[abyssPrefs.theme].noteFx });
         }
         return voice;
     },
@@ -4534,6 +4984,8 @@ function musicPointerDown(id, holder) {
     } else if (id === "space" || id === "enter") {
         latchedPedal = !latchedPedal;
         applyPedal();
+    } else if (id === "tab" && abyssOn) {
+        cycleAbyssTheme(1);
     }
 }
 
@@ -4565,10 +5017,197 @@ function hideAbyssHint() {
     abyssHintTimer = setTimeout(() => $("abyss-hint").classList.add("gone"), 2500);
 }
 
+// ---------- 水箱的风格 + 自己挑的颜色（记在这台浏览器里）----------
+// 每种风格各记各的：在火山里把键盘调成了黑金，换到冰川还是冰川原来的样子
+const ABYSS_PREFS_KEY = "mss-abyss";
+const abyssPrefs = loadAbyssPrefs();
+const HEX_RE = /^#[0-9a-f]{6}$/i;
+// 深海里一排比一排高（从 F 键那排往前：1.6 → 0，一级 0.32）：隔着前壁平视，前一排只挡住后一排正面的下半截，
+// 每颗琴键正面刻着的字母和音级都露出来——一眼就知道哪个键是哪个音
+const ABYSS_TIERS = [1.6, 1.28, 0.96, 0.64, 0.32, 0];
+const ABYSS_AMB_DEFAULT = 85;
+
+function loadAbyssPrefs() {
+    try {
+        const raw = JSON.parse(store.get(ABYSS_PREFS_KEY)) || {};
+        return {
+            theme: ABYSS_THEMES[raw.theme] ? raw.theme : "abyss",
+            custom: raw.custom && typeof raw.custom === "object" ? raw.custom : {},
+            amb: raw.amb && typeof raw.amb === "object" ? raw.amb : {},
+        };
+    } catch (err) {
+        return { theme: "abyss", custom: {}, amb: {} };
+    }
+}
+
+function saveAbyssPrefs() {
+    store.set(ABYSS_PREFS_KEY, JSON.stringify(abyssPrefs));
+}
+
+// 这一种风格里自己挑过的颜色：{ keys, bg, edge }（没挑过的不在里面）
+function abyssCustom(id = abyssPrefs.theme) {
+    const c = abyssPrefs.custom[id] || {};
+    const out = {};
+    ["keys", "bg", "edge"].forEach((f) => { if (HEX_RE.test(c[f] || "")) out[f] = c[f].toLowerCase(); });
+    return out;
+}
+
+// "#rrggbb" 的相对亮度（0 黑 – 1 白）
+function hexLuma(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const lin = (v) => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+}
+
+// 键帽：风格自带的那一套；挑了"键盘"颜色的话，照着那个颜色现配一套——
+// 功能键深一截、强调键浅一截、外壳和底板压得很暗，字按键帽亮度挑深浅
+const abyssCwCache = new Map();
+function abyssColorway() {
+    const theme = ABYSS_THEMES[abyssPrefs.theme];
+    const base = COLORWAYS[theme.colorway] || COLORWAYS.abyss;
+    const k = abyssCustom().keys;
+    if (!k) return base;
+    const key = abyssPrefs.theme + k;
+    if (abyssCwCache.has(key)) return abyssCwCache.get(key);
+    const accent = mixHex(k, "#ffffff", 0.3);
+    const cw = {
+        ...base,
+        alpha: k,
+        mod: mixHex(k, "#000000", 0.38),
+        accent,
+        case: mixHex(k, "#000000", 0.72),
+        plate: mixHex(k, "#000000", 0.86),
+        alphaLegend: hexLuma(k) > 0.4 ? mixHex(k, "#000000", 0.8) : base.alphaLegend,
+        accentLegend: hexLuma(accent) > 0.4 ? mixHex(k, "#000000", 0.8) : base.accentLegend,
+    };
+    abyssCwCache.set(key, cw);
+    return cw;
+}
+
+function abyssAmbVol(id = abyssPrefs.theme) {
+    const v = abyssPrefs.amb[id];
+    return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : ABYSS_AMB_DEFAULT;
+}
+
+// 界面跟着风格：标题、提示、强调色、面板里的选中项和颜色
+function syncAbyssHud() {
+    const theme = ABYSS_THEMES[abyssPrefs.theme];
+    const c = abyssCustom();
+    const hud = $("abyss-hud");
+    $("abyss-title").textContent = theme.name;
+    $("abyss-en").textContent = theme.en;
+    $("abyss-hint").textContent = theme.hint;
+    hud.style.setProperty("--ah-accent", c.edge || theme.ui);
+    hud.dataset.theme = abyssPrefs.theme;
+    document.querySelectorAll("#abyss-themes .ah-theme").forEach((b) => {
+        const on = b.dataset.theme === abyssPrefs.theme;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", String(on));
+    });
+    const cw = COLORWAYS[theme.colorway] || COLORWAYS.abyss;
+    $("abyss-c-keys").value = c.keys || cw.alpha;
+    $("abyss-c-bg").value = c.bg || theme.bg;
+    $("abyss-c-edge").value = c.edge || theme.led;
+    const v = abyssAmbVol();
+    $("abyss-amb").value = String(v);
+    $("abyss-amb-v").textContent = v + "%";
+    $("abyss-c-reset").disabled = !Object.keys(c).length;
+}
+
+// 风格、颜色、环境声一起换过去（水里的颜色慢慢过渡，键帽跟着换）
+function applyAbyssLook({ instant = false } = {}) {
+    const theme = ABYSS_THEMES[abyssPrefs.theme];
+    abyss.setTheme(abyssPrefs.theme, abyssCustom(), { instant });
+    applyColorway(abyssColorway(), instant ? { instant: true } : undefined);
+    audio.setAmbience(theme.amb, ambLevelOf(abyssAmbVol()));
+    syncAbyssHud();
+}
+
+function setAbyssTheme(id) {
+    if (!ABYSS_THEMES[id] || id === abyssPrefs.theme) return;
+    abyssPrefs.theme = id;
+    saveAbyssPrefs();
+    if (!abyssOn) return;
+    applyAbyssLook();
+    // 换了一种水：从中间荡开一圈光
+    stage.ripple("g", { strength: 1, speed: 7, life: 1.8 });
+    $("abyss-hint").classList.remove("gone");
+    hideAbyssHint();
+}
+
+// Tab / 点 3D 键盘上的 tab：按顺序换下一种（Shift 往回）
+function cycleAbyssTheme(dir = 1) {
+    const order = ABYSS_THEME_ORDER;
+    const i = order.indexOf(abyssPrefs.theme);
+    setAbyssTheme(order[(i + dir + order.length) % order.length]);
+}
+
+// 拖颜色的时候每一下都会来：合并到下一帧再换，拖起来不卡
+let abyssColorQueued = false;
+function setAbyssColor(field, hex) {
+    const id = abyssPrefs.theme;
+    const c = { ...(abyssPrefs.custom[id] || {}) };
+    if (hex && HEX_RE.test(hex)) c[field] = hex.toLowerCase();
+    else delete c[field];
+    if (Object.keys(c).length) abyssPrefs.custom[id] = c;
+    else delete abyssPrefs.custom[id];
+    saveAbyssPrefs();
+    if (!abyssOn || abyssColorQueued) return;
+    abyssColorQueued = true;
+    requestAnimationFrame(() => {
+        abyssColorQueued = false;
+        if (abyssOn) applyAbyssLook();
+    });
+}
+
+function resetAbyssColors() {
+    delete abyssPrefs.custom[abyssPrefs.theme];
+    saveAbyssPrefs();
+    if (abyssOn) applyAbyssLook();
+}
+
+function toggleAbyssPanel(open) {
+    const panel = $("abyss-panel");
+    const on = open != null ? open : panel.hidden;
+    panel.hidden = !on;
+    $("abyss-hud").classList.toggle("panel-open", on);
+    $("btn-abyss-style").setAttribute("aria-expanded", String(on));
+    $("btn-abyss-style").classList.toggle("on", on);
+}
+
+function buildAbyssPanel() {
+    const el = $("abyss-themes");
+    ABYSS_THEME_ORDER.forEach((id) => {
+        const t = ABYSS_THEMES[id];
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ah-theme";
+        b.dataset.theme = id;
+        b.style.setProperty("--th", t.ui);
+        b.style.setProperty("--th-bg", t.bg);
+        b.innerHTML = `<span class="ah-theme-dot" aria-hidden="true"></span><span class="ah-theme-name">${t.name}</span><span class="ah-theme-en">${t.en}</span>`;
+        b.addEventListener("click", () => setAbyssTheme(id));
+        el.appendChild(b);
+    });
+    [["abyss-c-keys", "keys"], ["abyss-c-bg", "bg"], ["abyss-c-edge", "edge"]].forEach(([elId, field]) => {
+        $(elId).addEventListener("input", (e) => setAbyssColor(field, e.target.value));
+    });
+    $("abyss-c-reset").addEventListener("click", resetAbyssColors);
+    $("abyss-amb").addEventListener("input", (e) => {
+        const v = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+        abyssPrefs.amb[abyssPrefs.theme] = v;
+        $("abyss-amb-v").textContent = v + "%";
+        if (abyssOn) audio.setAmbience(ABYSS_THEMES[abyssPrefs.theme].amb, ambLevelOf(v));
+    });
+    $("abyss-amb").addEventListener("change", saveAbyssPrefs);
+    $("btn-abyss-style").addEventListener("click", () => toggleAbyssPanel());
+}
+
 function enterAbyss() {
     if (!abyss || abyssOn) return;
     if (currentScreen !== "music") enterMusicMode();
     const go = () => {
+        endSwap({ interrupt: true });
         abyssOn = true;
         stopPlayback();
         setFollow(false);
@@ -4577,18 +5216,25 @@ function enterAbyss() {
         document.body.classList.add("abyss");
         $("abyss-hud").hidden = false;
         $("abyss-hint").classList.remove("gone");
+        toggleAbyssPanel(false);
         // 提示词里是钢琴：进来先换成钢琴，F 键照样能换
         if (musicPatch !== "piano") setInstrument("piano");
-        applyColorway(COLORWAYS.abyss);
-        abyss.enter();
+        syncCapGradient(); // 渐变键帽只在平常的音乐模式里：水箱有自己的一套
+        abyss.enter(abyssPrefs.theme, abyssCustom());
+        applyAbyssLook({ instant: true });
         stage.setInteractive((id) => !!CELL[id] || id === "esc" || id === "tab");
+        // 一排比一排高、正面刻上字母和音级
+        stage.setTiers((k) => ABYSS_TIERS[k.spec.row] || 0);
+        syncBankKeys();
+        refreshMusicKeyboard();
+        legend("tab", { main: "tab", sub: "风格", front: "风格" });
+        legend("esc", { main: "esc", sub: "浮上去", front: "浮上" });
         const t0 = stage.time;
         stage.setView(abyssView(0), { instant: false });
         abyssCam = stage.onTick(() => stage.setView(abyssView(stage.time - t0)));
-        // 声音：大教堂一样的混响、回声、长尾，环境声换成深海的轰鸣和远处的气泡
-        audio.setFx({ reverb: "cathedral", echo: 0.5, bloom: 0.8, width: 1.5, tone: "clear", cinematic: false });
-        audio.setAmbience("abyss", 0.95);
-        $("abyss-inst").textContent = INSTRUMENTS[musicPatch].name;
+        // 声音：大教堂一样的混响（混响修好之后教堂很"湿"：这里只开到六成五，不然琴声糊成一片）、回声、长尾；
+        // 环境声换成这一种水箱的（applyAbyssLook 里已经换好）
+        audio.setFx({ reverb: "cathedral", reverbMix: 0.65, echo: 0.5, bloom: 0.8, width: 1.5, tone: "clear", cinematic: false });
         const sel = $("abyss-song");
         sel.innerHTML = allSongs().map((s, i) => `<option value="${i}">${escapeText(s.name)}</option>`).join("");
         const pick = allSongs().findIndex((s) => s.name === "天空之城");
@@ -4606,6 +5252,9 @@ function teardownAbyss() {
     abyssCam = null;
     clearTimeout(abyssHintTimer);
     abyss.exit();
+    stage.setTiers(null);
+    clearLegends(); // 正面刻的字只属于水箱：下一屏自己铺字
+    toggleAbyssPanel(false);
     document.body.classList.remove("abyss");
     $("abyss-hud").hidden = true;
     $("btn-abyss-play").classList.remove("on");
@@ -4799,6 +5448,15 @@ function bindEvents() {
             return;
         }
         if (isTyping(e)) return; // 编辑器里空格是分隔符、b 是降号，不能变成踏板和琴键
+        // 深海里 Tab 换水箱的风格（焦点在那条控制栏里时还是正常的 Tab，挨个走按钮）
+        if (e.key === "Tab" && abyssOn && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target.closest && e.target.closest("#abyss-hud"))) {
+            e.preventDefault();
+            if (!e.repeat) {
+                mirrorDown(e.code, "tab");
+                cycleAbyssTheme(e.shiftKey ? -1 : 1);
+            }
+            return;
+        }
         const vid = CODE_TO_ID[e.code];
         if (vid && !e.repeat) mirrorDown(e.code, vid);
 
@@ -5106,6 +5764,8 @@ function init() {
     buildStylePanel();
     buildKeySelect();
     buildInstRow();
+    buildCapGradRow();
+    buildAbyssPanel();
     bindEvents();
 
     audio.setVolume(volume);
@@ -5132,6 +5792,13 @@ function init() {
 
 if (stage) {
     init();
+    // 页面空闲下来（开场的镜头落定了）再把梦境和深海要用的着色器先编好：
+    // 第一次换乐器飘键帽、第一次过关、第一次进深海时就不会因为现编着色器卡那一下
+    const warmGPU = () => {
+        if (!dream) return;
+        dream.prewarm().then(() => (abyss ? abyss.prewarm() : null)).catch(() => {});
+    };
+    setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(warmGPU, { timeout: 4000 }) : warmGPU()), 2500);
     // 自测用：地址后面加 ?debug 才把内部状态挂到 window 上
     if (/[?&]debug\b/.test(location.search)) {
         window.__ub = {

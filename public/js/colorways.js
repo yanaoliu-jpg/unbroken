@@ -348,6 +348,17 @@ export const COLORWAYS = {
         grad: ["#3ff5e0", "#7ff2e8", "#ffd36b"],
     },
     // 贝斯：炭黑 + 黄铜，像深夜的爵士酒吧
+    // 小号：擦亮的黄铜外壳 + 象牙白键帽 + 琴盒里那种酒红丝绒色的功能键
+    huangtong: {
+        name: "黄铜", en: "Brass",
+        case: "#b8892e", plate: "#2a1a08",
+        alpha: "#f5ecd5", alphaLegend: "#5a3a12",
+        mod: "#7a1f2b", modLegend: "#f3d9a4",
+        accent: "#d9a441", accentLegend: "#3a2506",
+        highlight: "#ffe3a3", glow: "#ffc65a", knob: "#e0b454",
+        legendGlow: false, bg: "#120a05", ink: "#f7ecd9",
+        grad: ["#ffd27a", "#ffae4a", "#ff7a5c"],
+    },
     jueshi: {
         name: "爵士", en: "Jazz Club",
         case: "#262322", plate: "#121010",
@@ -517,8 +528,44 @@ export const COLORWAYS = {
         mod: "#070d13", modLegend: "#58cfe6",
         accent: "#0f2a3a", accentLegend: "#9ff6ff",
         highlight: "#5ff0ff", glow: "#2ee6ff", knob: "#3a5566",
+        switchHousing: "#16232c", switchStem: "#2ee6ff",
         legendGlow: true, bg: "#010306", ink: "#d8f6ff",
         grad: ["#1ef2ff", "#2a8bff", "#5a6cff"],
+    },
+
+    // 深海模式的另外三种水箱：键帽暗，字自己发光（正面的侧刻字在水里也读得清）
+    abyssVolcano: {
+        name: "火山", en: "Volcano",
+        case: "#0c0604", plate: "#060302",
+        alpha: "#1c100b", alphaLegend: "#ffb070",
+        mod: "#130a07", modLegend: "#ff8a4a",
+        accent: "#3f150b", accentLegend: "#ffd08a",
+        highlight: "#ff9a4a", glow: "#ff6a1f", knob: "#6e3c22",
+        switchHousing: "#2a1a14", switchStem: "#ff7a2a",
+        legendGlow: true, bg: "#050100", ink: "#ffe6d0",
+        grad: ["#ff3d00", "#ff8a1f", "#ffd24a"],
+    },
+    abyssGlacier: {
+        name: "冰川", en: "Glacier",
+        case: "#0d1b26", plate: "#06101a",
+        alpha: "#6f93a8", alphaLegend: "#f2fbff",
+        mod: "#3f5d6e", modLegend: "#dff6ff",
+        accent: "#a9d6ea", accentLegend: "#0e3a52",
+        highlight: "#e8fbff", glow: "#bfefff", knob: "#9fc9dc",
+        switchHousing: "#3a5566", switchStem: "#dff6ff",
+        legendGlow: true, bg: "#01050a", ink: "#e8f8ff",
+        grad: ["#bfefff", "#6fc3ff", "#9aa8ff"],
+    },
+    abyssMeadow: {
+        name: "田园", en: "Meadow",
+        case: "#12200c", plate: "#0a1206",
+        alpha: "#2c4624", alphaLegend: "#f2f7c8",
+        mod: "#1d3017", modLegend: "#d4f27a",
+        accent: "#c9a74a", accentLegend: "#2a2208",
+        highlight: "#fff2b0", glow: "#d4f27a", knob: "#b8963e",
+        switchHousing: "#1f2a17", switchStem: "#d4f27a",
+        legendGlow: true, bg: "#010401", ink: "#f3f8dc",
+        grad: ["#8fdc5a", "#d4f27a", "#ffe58a"],
     },
 
     // 音乐模式里选"钢琴"时穿这一套：黑白键帽，红色 Esc / Enter

@@ -10,6 +10,23 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23041211'/%3E%3Cpath d='M8 9h6v7h6v7h4' fill='none' stroke='%234fe6c4' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="style.css">
     <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
+    <!-- 所有模块一开始就一起去要（不然是一层等一层：页面 → script.js → kb3d.js → three.js……）。
+         必须写在 importmap 后面 -->
+    <link rel="modulepreload" href="script.js">
+    <link rel="modulepreload" href="vendor/three/three.module.js">
+    <link rel="modulepreload" href="vendor/three/three.core.js">
+    <link rel="modulepreload" href="js/kb3d.js">
+    <link rel="modulepreload" href="js/audio.js">
+    <link rel="modulepreload" href="js/piano.js">
+    <link rel="modulepreload" href="js/colorways.js">
+    <link rel="modulepreload" href="js/abyss.js">
+    <link rel="modulepreload" href="js/post.js">
+    <link rel="modulepreload" href="js/dream.js">
+    <link rel="modulepreload" href="js/dreamsky.js">
+    <link rel="modulepreload" href="js/motifs.js">
+    <link rel="modulepreload" href="vendor/three/addons/RoundedBoxGeometry.js">
+    <link rel="modulepreload" href="vendor/three/addons/RoomEnvironment.js">
+    <link rel="modulepreload" href="vendor/three/addons/BufferGeometryUtils.js">
 </head>
 <body class="on-home">
     <!-- 背景：深色底 + 两团随配色变化、缓缓漂移的光 + 一层颗粒 -->
@@ -17,6 +34,8 @@
         <div class="bg-light bg-light-a"></div>
         <div class="bg-light bg-light-b"></div>
         <div class="bg-light bg-light-c"></div>
+        <!-- 每套配色自己的背景画：青岚的山、晨光的日出、霜夜的月亮…… -->
+        <canvas id="backdrop-canvas" class="backdrop-canvas"></canvas>
         <div class="bg-aurora"></div>
         <canvas id="scene-canvas" class="scene-canvas"></canvas>
         <!-- 过关的梦境：页面沉进夜里，星云、星星、光斑从背后浮出来 -->
@@ -84,6 +103,12 @@
                 <div class="sp-row"><span class="sp-k">回声</span><div class="seg" id="sp-echo" role="group" aria-label="回声"></div></div>
                 <div class="sp-row"><span class="sp-k">画风</span><div class="seg" id="sp-tone" role="group" aria-label="画风"></div></div>
                 <div class="sp-toggles" id="sp-toggles" role="group" aria-label="效果开关"></div>
+                <div class="sp-row sp-amb" id="sp-amb-row">
+                    <span class="sp-k">环境</span>
+                    <span class="sp-amb-name" id="sp-amb-name">先选一个场景</span>
+                    <input id="sp-amb" class="sp-range" type="range" min="0" max="100" step="1" value="55" aria-label="环境声音量（每个场景各记各的）">
+                    <span class="sp-amb-v" id="sp-amb-v">55%</span>
+                </div>
                 <div class="sp-check">
                     <button id="sp-check" class="sp-check-btn" type="button">🔊 测一下声音</button>
                     <span class="sp-check-out" id="sp-check-out" aria-live="polite"></span>
@@ -255,6 +280,9 @@
                     <button type="button" class="bank-btn" data-bank="1">B 组</button>
                 </div>
                 <span class="inst-bank-hint">F1–F12 选乐器 · Caps Lock 换组</span>
+                <div class="cap-grad" id="cap-grad" role="group" aria-label="键帽配色">
+                    <span class="cg-k">键帽</span>
+                </div>
             </div>
             <div class="inst-row" id="inst-row" role="group" aria-label="乐器"></div>
 
@@ -306,13 +334,25 @@
             <!-- 深海模式：整块键盘沉进水箱，界面只留下这一层 -->
             <div class="abyss-hud" id="abyss-hud" hidden>
                 <div class="ah-top">
-                    <span class="ah-title">深海</span>
-                    <span class="ah-en">ABYSS</span>
+                    <span class="ah-title" id="abyss-title">深海</span>
+                    <span class="ah-en" id="abyss-en">ABYSS</span>
                 </div>
                 <p class="ah-hint" id="abyss-hint">按下琴键，荧光的气泡和光柱会从键里升起来</p>
+                <!-- 水箱的风格：四种水 + 自己挑键盘 / 背景 / 棱柱的颜色 + 环境声大小 -->
+                <div class="ah-panel" id="abyss-panel" hidden>
+                    <div class="ah-themes" id="abyss-themes" role="group" aria-label="水箱风格"></div>
+                    <div class="ah-colors">
+                        <label class="ah-color"><input type="color" id="abyss-c-keys" aria-label="键盘颜色"><span>键盘</span></label>
+                        <label class="ah-color"><input type="color" id="abyss-c-bg" aria-label="背景颜色"><span>背景</span></label>
+                        <label class="ah-color"><input type="color" id="abyss-c-edge" aria-label="棱柱颜色"><span>棱柱</span></label>
+                        <button id="abyss-c-reset" class="ah-mini" type="button">还原</button>
+                    </div>
+                    <label class="ah-vol"><span>环境声</span><input id="abyss-amb" type="range" min="0" max="100" step="1" value="85"><span id="abyss-amb-v">85%</span></label>
+                </div>
                 <div class="ah-bar">
                     <select id="abyss-song" class="ah-select" aria-label="演示曲目"></select>
                     <button id="btn-abyss-play" class="ah-btn ah-play" type="button">▶ 演示</button>
+                    <button id="btn-abyss-style" class="ah-btn" type="button" aria-expanded="false" aria-controls="abyss-panel"><kbd>tab</kbd>风格</button>
                     <span class="ah-inst" id="abyss-inst">钢琴</span>
                     <button id="btn-abyss-exit" class="ah-btn" type="button"><kbd>esc</kbd>浮上去</button>
                 </div>
@@ -320,6 +360,8 @@
         </section>
 
     </main>
+    <!-- 前景的景深光斑：在键盘上面、界面下面 -->
+    <canvas id="scene-fg" class="scene-fg" aria-hidden="true"></canvas>
 
     <!-- 过关时，句子里每个词的首字母：先像灯笼一样挂在 3D 键盘的键上（lantern-layer），放飞后飞进句子（fly-layer） -->
     <div id="lantern-layer" class="lantern-layer"></div>
